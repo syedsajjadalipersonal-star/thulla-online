@@ -1,0 +1,132 @@
+<title>Thulla</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rozha+One&family=Karla:wght@400;600;800&display=swap">
+<style>
+/* Layout: a classic four-handed card table. Felt in the middle; Hina across, Bilal on the left, Zara on the right, you at the bottom with your hand fanned below. Single deliberate look: green baize, white cards, red lattice backs. */
+:root{
+  --baize:#1e6e3e; --baize-deep:#13502b; --room:#0d3520;
+  --chalk:#f4f1e7; --muted:#b7d3bf; --gold:#f2c14e; --rose:#e2475b; --lattice:#b3202c;
+  --display:"Rozha One", Georgia, "Times New Roman", serif;
+  --body:"Karla", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cw:clamp(50px, 14.5vw, 72px);
+  --ch:calc(var(--cw) * 1.4);
+  color-scheme:dark;
+}
+html,body{min-height:100%}
+body{background:var(--room);color:var(--chalk);font-family:var(--body);font-size:15px;line-height:1.45;
+  padding-left:max(12px, env(safe-area-inset-left, 0px));padding-right:max(12px, env(safe-area-inset-right, 0px));padding-block:10px 20px}
+@media (min-width:380px){body{padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px))}}
+.app{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:10px}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+h1{font-family:var(--display);font-weight:400;font-size:1.9rem;line-height:1;margin:0;color:var(--gold)}
+.hbtns{display:flex;gap:8px}
+button{font:inherit;cursor:pointer}
+.btn{background:transparent;color:var(--chalk);border:1px solid rgba(244,241,231,.3);border-radius:999px;padding:6px 13px;font-weight:600;font-size:.82rem}
+.btn:hover{border-color:var(--gold);color:var(--gold)}
+.btn.primary{background:var(--gold);color:#1b1608;border-color:var(--gold)}
+.btn.primary:hover{background:var(--chalk);color:#1b1608}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+/* table */
+.felt{position:relative;border-radius:22px;padding:10px 6px;
+  background:radial-gradient(110% 90% at 50% 45%, var(--baize) 0%, var(--baize-deep) 78%);
+  box-shadow:inset 0 0 0 6px #0a2a18, inset 0 0 40px rgba(0,0,0,.35);
+  display:grid;grid-template-columns:clamp(46px,13vw,70px) minmax(0,1fr) clamp(46px,13vw,70px);
+  grid-template-areas:"top top top" "left center right" "bottom bottom bottom";gap:6px}
+.seat{display:flex;align-items:center;gap:6px;min-width:0}
+.seat.top{grid-area:top;flex-direction:column}
+.seat.left{grid-area:left;flex-direction:column;justify-content:center}
+.seat.right{grid-area:right;flex-direction:column;justify-content:center}
+.seat.bottom{grid-area:bottom;justify-content:center}
+.tag{display:flex;flex-direction:column;align-items:center;gap:0;padding:3px 10px;border-radius:10px;background:rgba(0,0,0,.28);text-align:center;max-width:100%}
+.tag b{font-weight:800;font-size:.85rem;letter-spacing:.02em}
+.tag small{font-size:.66rem;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.seat.left .tag,.seat.right .tag{padding:3px 6px}
+.seat.left .tag small,.seat.right .tag small{letter-spacing:0;text-transform:none;font-size:.68rem}
+.seat.turn .tag{background:var(--gold);color:#1b1608}
+.seat.turn .tag small{color:#3d3008}
+.seat.safe .tag{outline:1px solid var(--muted)}
+.seat.lost .tag{background:var(--rose);color:#fff}
+.seat.lost .tag small{color:#fff}
+
+.fan{position:relative}
+.fan.h{height:40px}
+.fan.v{width:40px}
+.back{position:absolute;border-radius:3px;background:#fff;border:1px solid #9a968c;box-shadow:0 1px 1px rgba(0,0,0,.25)}
+.back::after{content:"";position:absolute;inset:2px;border-radius:2px;
+  background:repeating-linear-gradient(45deg, rgba(255,255,255,.32) 0 1px, transparent 1px 4px),repeating-linear-gradient(-45deg, rgba(255,255,255,.32) 0 1px, transparent 1px 4px),var(--lattice)}
+.fan.h .back{width:28px;height:40px;top:0}
+.fan.v .back{width:40px;height:28px;left:0}
+
+/* trick */
+.center{grid-area:center;position:relative;height:calc(var(--ch) * 2 + 18px);max-width:340px;width:100%;justify-self:center}
+.tcard{position:absolute;width:var(--cw);animation:slide .28s ease-out}
+.tcard svg{display:block;width:100%;height:auto;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
+.p0{left:50%;bottom:0;--fx:-50%;--fy:0;--sx:0;--sy:40px;transform:translateX(-50%)}
+.p2{left:50%;top:0;--fx:-50%;--fy:0;--sx:0;--sy:-40px;transform:translateX(-50%)}
+.p1{left:2%;top:50%;--fx:0;--fy:-50%;--sx:-40px;--sy:0;transform:translateY(-50%)}
+.p3{right:2%;top:50%;--fx:0;--fy:-50%;--sx:40px;--sy:0;transform:translateY(-50%)}
+@keyframes slide{from{opacity:0;transform:translate(calc(var(--fx) + var(--sx)),calc(var(--fy) + var(--sy)))}to{opacity:1;transform:translate(var(--fx),var(--fy))}}
+.tcard.high svg{filter:drop-shadow(0 0 6px var(--gold)) drop-shadow(0 0 2px var(--gold))}
+.stamp{position:absolute;left:50%;bottom:-7px;transform:translateX(-50%) rotate(-6deg);background:var(--rose);color:#fff;font-family:var(--display);font-size:.74rem;padding:0 7px;border-radius:4px;white-space:nowrap;line-height:1.5}
+.stamp.soft{background:var(--muted);color:#12301d}
+.lead-note{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;pointer-events:none}
+
+.msg{min-height:2.6em;text-align:center;font-size:.93rem;text-wrap:balance;max-width:46ch;margin:0 auto}
+.msg b{color:var(--gold)}
+.msg .hit{color:var(--rose);font-family:var(--display);font-size:1.1rem;font-weight:400}
+
+/* hand */
+.hand{position:relative;margin-top:2px}
+.hcard{position:absolute;padding:0;border:0;background:none;width:var(--hw);transition:transform .15s, filter .15s;border-radius:8px}
+.hcard svg{display:block;width:100%;height:auto;filter:drop-shadow(-1px 1px 2px rgba(0,0,0,.35))}
+.hand.myturn .hcard.ok{transform:translateY(-12px)}
+.hand.myturn .hcard.ok:hover{transform:translateY(-18px)}
+.hand.myturn .hcard.no{filter:brightness(.55) saturate(.6)}
+.hcard:disabled{cursor:default}
+.empty{color:var(--muted);text-align:center;padding:14px 0}
+
+/* end + rules */
+.end{border:1px solid var(--gold);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;background:rgba(0,0,0,.25)}
+.end h2{font-family:var(--display);font-weight:400;font-size:1.45rem;margin:0;color:var(--gold);text-wrap:balance}
+.end ol{margin:0;padding-left:1.3em}
+.end .tally{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+details{border:1px solid rgba(244,241,231,.2);border-radius:12px;padding:10px 14px}
+summary{cursor:pointer;font-weight:800;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;font-size:.76rem}
+details ol{margin:10px 0 2px;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;max-width:65ch}
+details b{color:var(--gold)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="app">
+  <header>
+    <h1>Thulla</h1>
+    <div class="hbtns">
+      <button class="btn" id="speedBtn" type="button">Speed: normal</button>
+      <button class="btn primary" id="newBtn" type="button">New game</button>
+    </div>
+  </header>
+  <main class="felt" aria-label="Card table">
+    <div class="seat top" id="seat2"><div class="fan h"></div><div class="tag"><b>Hina</b><small></small></div></div>
+    <div class="seat left" id="seat1"><div class="fan v"></div><div class="tag"><b>Bilal</b><small></small></div></div>
+    <div class="center" id="center" aria-live="polite"></div>
+    <div class="seat right" id="seat3"><div class="fan v"></div><div class="tag"><b>Zara</b><small></small></div></div>
+    <div class="seat bottom" id="seat0"><div class="tag"><b>You</b><small></small></div></div>
+  </main>
+  <div class="msg" id="msg"></div>
+  <div id="endBox"></div>
+  <div class="hand" id="hand"></div>
+  <details>
+    <summary>How Thulla works</summary>
+    <ol>
+      <li>All 52 cards are dealt, 13 each. Whoever holds the <b>A♠</b> opens the first trick with it. Play goes clockwise.</li>
+      <li>Everyone must follow the suit that was led. Ace is high, 2 is low.</li>
+      <li>If everyone follows, the trick goes to the discard pile and the highest card leads next.</li>
+      <li>On the first round there are no thullas: if you have no spades, play any card and it goes to the pile with the rest of the trick.</li>
+      <li>After that, if you can't follow, play any card. That's a <b>thulla</b>. The trick stops right there and whoever played the highest card of the led suit picks up every card on the table, then leads.</li>
+      <li>Empty your hand and you're safe. The last player still holding cards loses.</li>
+    </ol>
+  </details>
+</div>

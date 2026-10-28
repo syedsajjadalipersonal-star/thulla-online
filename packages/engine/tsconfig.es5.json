@@ -1,0 +1,16 @@
+{
+  "//": "Nakama's TypeScript runtime only runs ES5. lib is limited to ES5 so any ES2015 built-in (Set, Map, Array.prototype.find, Object.assign...) fails to compile.",
+  "compilerOptions": {
+    "target": "ES5",
+    "lib": ["ES5"],
+    "types": [],
+    "module": "CommonJS",
+    "ignoreDeprecations": "6.0",
+    "strict": true,
+    "outDir": "../../build/engine-es5",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "noEmitHelpers": false
+  },
+  "include": ["src"]
+}

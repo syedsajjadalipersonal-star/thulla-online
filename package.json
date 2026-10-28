@@ -1,0 +1,25 @@
+{
+  "name": "thulla-online",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thulla card game: rules engine, bots and table UI, on the way to online multiplayer with Nakama.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "check:es5": "tsc -p packages/engine/tsconfig.es5.json && node scripts/check-es5.mjs",
+    "test": "tsx --test packages/engine/test/*.test.ts packages/bot/test/*.test.ts",
+    "build:web": "node scripts/build-web.mjs",
+    "selfplay": "tsx scripts/selfplay.ts",
+    "verify": "npm run typecheck && npm run check:es5 && npm test && npm run build:web"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.3",
+    "acorn": "8.18.0",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.12",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
