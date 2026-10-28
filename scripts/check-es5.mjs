@@ -2,9 +2,10 @@
 // Nakama's JavaScript runtime only runs ES5, so any newer syntax here would fail on the server.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parse } from 'acorn';
 
-const dir = new URL('../build/engine-es5/', import.meta.url).pathname;
+const dir = fileURLToPath(new URL('../build/engine-es5/', import.meta.url));
 let failed = 0;
 for (const name of readdirSync(dir).filter((f) => f.endsWith('.js'))) {
   const file = join(dir, name);

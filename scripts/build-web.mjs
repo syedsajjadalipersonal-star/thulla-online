@@ -2,9 +2,10 @@
 //   dist/index.html     full document: open it in a browser, or wrap it with Capacitor later
 //   dist/artifact.html  the same page without <html>/<head>/<body>, for publishing as a Claude artifact
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 const common = {
   bundle: true,
   write: false,
