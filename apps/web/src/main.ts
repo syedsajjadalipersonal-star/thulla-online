@@ -1,9 +1,9 @@
 /**
- * Single-player Thulla table: you against three bots.
+ * The Thulla table: you against three bots, or four players online.
  *
  * The rules live in @thulla/engine. This file only keeps the committed game state,
- * asks the engine what happened after each move, and turns the events into
- * messages, pauses and animations.
+ * asks the engine (or, online, the server) what happened after each move, and turns
+ * the events into messages, pauses and animations.
  */
 import {
   apply,
@@ -20,16 +20,33 @@ import {
 } from '@thulla/engine';
 import { chooseCard, quickCard, type BotOptions } from '@thulla/bot';
 import { CardArt } from './cardArt';
+import { Table, errorText } from './net';
+import {
+  deviceId,
+  emptyState,
+  rotate,
+  rotateEvents,
+  saveName,
+  saveTable,
+  savedName,
+  savedTable,
+  seatAt,
+  serverAddress,
+  stateFromView,
+} from './online';
+import type { EventMessage, SeatsMessage } from '../../../packages/nakama/src/protocol';
 
 declare const BOT_WORKER_SOURCE: string;
 
-const NAMES = ['You', 'Bilal', 'Hina', 'Zara'];
+const SOLO_NAMES = ['You', 'Bilal', 'Hina', 'Zara'];
+let NAMES = SOLO_NAMES.slice();
 const PLACE = ['1st', '2nd', '3rd'];
 const DISPLAY_ORDER = [0, 1, 3, 2]; // spades, hearts, clubs, diamonds: colours alternate
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const nm = (p: number) => (p === 0 ? 'You' : NAMES[p]);
 const B = (p: number) => (p === 0 ? '<b>You</b>' : '<b>' + NAMES[p] + '</b>');
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => '&#' + c.charCodeAt(0) + ';');
 
 /* ---------------------------------------------------------------- state */
 
@@ -119,7 +136,7 @@ function think(seat: number, opts: BotOptions): Promise<Card> {
 
 function schedule() {
   clearTimeout(timer);
-  if (game.over || pause || game.turn === 0) return;
+  if (online || game.over || pause || game.turn === 0) return;
   const seat = game.turn;
   const gid = gameId;
   const moveAt = game.moveCount;
@@ -148,10 +165,14 @@ function newGame() {
   pause = null;
   thinking = false;
   game = setup(newSeed());
-  const o = game.turn;
-  msg = `${o === 0 ? '<b>You</b> hold' : B(o) + ' holds'} the A♠ and open${o === 0 ? '' : 's'}. No thullas on this first round.`;
+  msg = openingMessage();
   render();
   schedule();
+}
+
+function openingMessage(): string {
+  const o = game.turn;
+  return `${o === 0 ? '<b>You</b> hold' : B(o) + ' holds'} the A♠ and open${o === 0 ? '' : 's'}. No thullas on this first round.`;
 }
 
 function play(seat: number, card: Card) {
@@ -161,12 +182,26 @@ function play(seat: number, card: Card) {
   const before = game;
   const result = apply(before, seat, { type: 'play', card });
   game = result.state;
-  const ended = result.events.filter((e) => e.type === 'pickup' || e.type === 'trickToPile');
+  if (game.over) {
+    const t = loadTally();
+    t.played++;
+    if (game.loser === 0) t.lost++;
+    saveTally(t);
+  }
+  showMove(before, seat, card, result.events, schedule);
+}
+
+/**
+ * Shows one move. `game` already holds the table after it. A move that ends a trick leaves the
+ * finished trick on the table for a moment, then says what happened. `next` runs once the table settles.
+ */
+function showMove(before: ThullaState, seat: number, card: Card, events: ThullaEvent[], next: () => void) {
+  const ended = events.filter((e) => e.type === 'pickup' || e.type === 'trickToPile');
 
   if (!ended.length) {
     msg = game.turn === 0 ? 'Your turn.' : '';
     render();
-    schedule();
+    next();
     return;
   }
 
@@ -190,15 +225,9 @@ function play(seat: number, card: Card) {
     () => {
       if (gid !== gameId) return;
       pause = null;
-      msg = describe(result.events);
-      if (game.over) {
-        const t = loadTally();
-        t.played++;
-        if (game.loser === 0) t.lost++;
-        saveTally(t);
-      }
+      msg = describe(events);
       render();
-      schedule();
+      next();
     },
     (thulla ? 1600 : 1250) / speed,
   );
@@ -234,6 +263,11 @@ function seatStatus(s: ThullaState, i: number): string {
   if (s.over && s.loser === i) return 'Lost';
   const place = s.finished.indexOf(i);
   if (place >= 0) return 'Safe · ' + PLACE[place];
+  if (online) {
+    const info = online.seats?.seats[seatAt(i, Math.max(0, online.me))];
+    if (!info) return i === 0 ? ' ' : 'Waiting…';
+    if (!info.connected) return 'Away';
+  }
   if (!s.over && !pause && s.turn === i) return i === 0 ? 'Your turn' : thinking ? 'Thinking…' : 'Playing';
   return ' ';
 }
@@ -267,6 +301,7 @@ function render() {
       (!s.over && !pause && s.turn === i ? ' turn' : '') +
       (s.finished.indexOf(i) >= 0 ? ' safe' : '') +
       (s.over && s.loser === i ? ' lost' : '');
+    (seat.querySelector('.tag b') as HTMLElement).textContent = NAMES[i];
     (seat.querySelector('small') as HTMLElement).textContent = seatStatus(s, i);
     if (i > 0) renderFan(seat.querySelector('.fan') as HTMLElement, s.hands[i].length, i !== 2);
   }
@@ -297,7 +332,7 @@ function render() {
     }
     el.classList.toggle('high', !!pause && pause.top === t.seat);
   }
-  if (!s.trick.length && !s.over) {
+  if (!s.trick.length && !s.over && s.turn >= 0) {
     const n = document.createElement('div');
     n.className = 'lead-note';
     n.textContent = s.turn === 0 ? 'Your lead' : nm(s.turn) + ' to lead';
@@ -307,8 +342,9 @@ function render() {
   $('msg').innerHTML = msg || (s.turn === 0 ? 'Your turn.' : '');
 
   const endBox = $('endBox');
-  if (s.over) {
-    const t = loadTally();
+  if (online && !online.started) {
+    renderLobby(endBox);
+  } else if (s.over) {
     const head =
       s.loser === 0
         ? "You're left holding cards. You lose this one."
@@ -318,9 +354,21 @@ function render() {
     const order =
       s.finished.map((i) => `<li>${i === 0 ? '<b>You</b>' : nm(i)}</li>`).join('') +
       (s.loser >= 0 ? `<li>${s.loser === 0 ? '<b>You</b>' : nm(s.loser)} (lost)</li>` : '');
-    endBox.innerHTML = `<div class="end"><h2>${head}</h2><ol>${order}</ol><div class="tally">Games on this device: ${t.played} · Lost: ${t.lost}</div><div><button class="btn primary" type="button" id="againBtn">Deal again</button></div></div>`;
-    $('againBtn').onclick = newGame;
-  } else endBox.innerHTML = '';
+    const again = '<div><button class="btn primary" type="button" id="againBtn">Deal again</button></div>';
+    let tail: string;
+    if (!online) {
+      const t = loadTally();
+      tail = `<div class="tally">Games on this device: ${t.played} · Lost: ${t.lost}</div>${again}`;
+    } else if (online.seats && online.seats.host === online.me) tail = again;
+    else tail = `<div class="tally">Waiting for ${online.seats ? nm(rotate(online.seats.host, online.me)) : 'the host'} to deal again.</div>`;
+    endBox.innerHTML = `<div class="end"><h2>${head}</h2><ol>${order}</ol>${tail}</div>`;
+    const btn = document.getElementById('againBtn');
+    if (btn) btn.onclick = online ? () => online?.table.start() : newGame;
+    lobbyKey = '';
+  } else {
+    endBox.innerHTML = '';
+    lobbyKey = '';
+  }
   renderHand(s);
 }
 
@@ -342,7 +390,7 @@ function renderHand(s: ThullaState) {
   let rows = 1;
   while (rows < 4 && (W - hw) / (Math.ceil(me.length / rows) - 1 || 1) < minStep) rows++;
   const per = Math.ceil(me.length / rows);
-  const legal = myTurn ? view(game, 0).legal : [];
+  const legal = myTurn ? (online ? online.legal : view(game, 0).legal) : [];
   const rowGap = hh * 0.52;
   hand.style.height = 12 + hh + (rows - 1) * rowGap + 'px';
   hand.style.setProperty('--hw', hw + 'px');
@@ -361,9 +409,263 @@ function renderHand(s: ThullaState) {
     b.innerHTML = svgOf(c);
     b.setAttribute('aria-label', cardName(c) + ` (${rankOf(c)})`);
     b.disabled = !ok;
-    if (ok) b.onclick = () => play(0, c);
+    if (ok) b.onclick = () => (online ? playOnline(c) : play(0, c));
     hand.appendChild(b);
   });
+}
+
+/* --------------------------------------------------------------- online */
+
+interface Online {
+  table: Table;
+  /** This player's seat at the server, or -1 before sitting down. */
+  me: number;
+  /** Moves seen so far in the current game. */
+  seq: number;
+  seats: SeatsMessage | null;
+  /** Cards the server says may be played now; emptied once a card is sent. */
+  legal: Card[];
+  /** Moves from the server waiting for the current trick display to finish. */
+  queue: EventMessage[];
+  started: boolean;
+  connected: boolean;
+  busy: boolean;
+}
+
+let online: Online | null = null;
+let lobbyKey = '';
+
+function goOnline() {
+  clearTimeout(timer);
+  gameId++;
+  pause = null;
+  thinking = false;
+  const o: Online = {
+    table: new Table(serverAddress(), deviceId()),
+    me: -1,
+    seq: 0,
+    seats: null,
+    legal: [],
+    queue: [],
+    started: false,
+    connected: false,
+    busy: false,
+  };
+  o.table.handlers = {
+    welcome: (w) => {
+      if (o !== online) return;
+      clearTimeout(timer);
+      gameId++;
+      pause = null;
+      o.me = w.seat;
+      o.seq = w.seq;
+      o.seats = w;
+      o.queue = [];
+      o.started = !!w.view;
+      game = w.view ? stateFromView(w.view, o.me) : emptyState();
+      o.legal = w.view ? w.view.legal : [];
+      updateNames();
+      msg = !w.view || game.over ? '' : w.seq === 0 ? openingMessage() : game.turn === 0 ? 'Your turn.' : '';
+      render();
+    },
+    seats: (m) => {
+      if (o !== online) return;
+      o.seats = m;
+      updateNames();
+      render();
+    },
+    event: (e) => {
+      if (o !== online) return;
+      o.queue.push(e);
+      drainMoves();
+    },
+    prompt: (p) => {
+      if (o !== online || pause || o.queue.length) return;
+      o.legal = p.legal;
+      render();
+    },
+    rejected: (r) => {
+      if (o !== online) return;
+      msg = esc(r.reason);
+      o.table.resync(o.seq);
+      render();
+    },
+    disconnected: () => reconnect(o, 0),
+  };
+  online = o;
+  lobbyKey = '';
+  game = emptyState();
+  msg = '';
+  updateNames();
+  updateHeader();
+  render();
+}
+
+function leaveOnline() {
+  const o = online;
+  online = null;
+  saveTable(null);
+  void o?.table.leave();
+  updateNames();
+  updateHeader();
+  newGame();
+}
+
+/** Connects if needed, runs a request, and remembers the table it leads to. */
+async function request(run: (t: Table) => Promise<void>) {
+  const o = online;
+  if (!o || o.busy) return;
+  o.busy = true;
+  msg = 'Connecting…';
+  render();
+  try {
+    if (!o.connected) {
+      await o.table.connect();
+      o.connected = true;
+    }
+    await run(o.table);
+    saveTable({ matchId: o.table.matchId, code: o.table.code });
+    if (msg === 'Connecting…') msg = '';
+  } catch (e) {
+    msg = esc(await errorText(e));
+  }
+  o.busy = false;
+  if (o === online) render();
+}
+
+/** Shows the server's moves one at a time, each after the previous trick has been on display. */
+function drainMoves() {
+  const o = online;
+  if (!o || pause) return;
+  const e = o.queue.shift();
+  if (!e) return;
+  if (e.seq !== o.seq + 1) {
+    o.queue = [];
+    o.table.resync(o.seq);
+    return;
+  }
+  o.seq = e.seq;
+  const events = rotateEvents(e.events, o.me);
+  const before = game;
+  game = stateFromView(e.view, o.me);
+  o.legal = e.view.legal;
+  const first = events[0];
+  if (first && first.type === 'played') showMove(before, first.seat, first.card, events, drainMoves);
+  else {
+    render();
+    drainMoves();
+  }
+}
+
+function playOnline(card: Card) {
+  const o = online;
+  if (!o || pause || game.turn !== 0 || o.legal.indexOf(card) < 0) return;
+  o.legal = [];
+  o.table.play(card, o.seq);
+  render();
+}
+
+/** After a dropped connection, sits back down at the same table as the same player. */
+function reconnect(o: Online, tries: number) {
+  if (o !== online) return;
+  const saved = savedTable();
+  if (!saved) {
+    o.connected = false;
+    msg = 'Lost the connection to the server.';
+    render();
+    return;
+  }
+  msg = 'Lost the connection. Sitting back down…';
+  render();
+  setTimeout(async () => {
+    if (o !== online) return;
+    const table = new Table(serverAddress(), deviceId(), o.table.handlers);
+    try {
+      await table.connect();
+      await table.join(saved.matchId, saved.code, savedName());
+      o.table = table;
+    } catch {
+      if (tries < 5) reconnect(o, tries + 1);
+      else {
+        msg = 'Could not get back to the table. Leave it and try again.';
+        render();
+      }
+    }
+  }, 2000);
+}
+
+function updateNames() {
+  if (!online) {
+    NAMES = SOLO_NAMES.slice();
+    return;
+  }
+  const o = online;
+  const me = Math.max(0, o.me);
+  NAMES = [0, 1, 2, 3].map((p) => {
+    if (p === 0) return 'You';
+    const info = o.seats?.seats[seatAt(p, me)];
+    return info ? info.name.replace(/[&<>"]/g, '') : 'Open seat';
+  });
+}
+
+function updateHeader() {
+  $('onlineBtn').hidden = !!online;
+  $('newBtn').textContent = online ? 'Leave table' : 'New game';
+}
+
+/** The box under the table while players gather: name and room code, then who is here. */
+function renderLobby(box: HTMLElement) {
+  const o = online as Online;
+  const seats = o.seats;
+  const key = JSON.stringify([o.me, o.table.code, seats, o.busy]);
+  if (key === lobbyKey) return;
+  lobbyKey = key;
+
+  if (o.me < 0) {
+    box.innerHTML = `<div class="end lobby">
+  <h2>Play online</h2>
+  <label class="field">Your name <input id="nameIn" maxlength="16" autocomplete="nickname" value="${esc(savedName())}"></label>
+  <div class="row"><button class="btn primary" type="button" id="createBtn">Open a table</button></div>
+  <div class="row"><input id="codeIn" maxlength="5" placeholder="Room code" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code"><button class="btn" type="button" id="joinBtn">Join table</button></div>
+  <div class="tally">Open a table and share its room code, or join a friend's table with theirs.</div>
+</div>`;
+    // Read the inputs before calling request(): it redraws this box.
+    const name = () => {
+      const n = ($('nameIn') as HTMLInputElement).value.trim();
+      saveName(n);
+      return n;
+    };
+    const join = () => {
+      const code = ($('codeIn') as HTMLInputElement).value.trim();
+      const n = name();
+      if (code) void request((t) => t.joinByCode(code, n));
+    };
+    for (const id of ['createBtn', 'joinBtn']) ($(id) as HTMLButtonElement).disabled = o.busy;
+    $('createBtn').onclick = () => {
+      const n = name();
+      void request((t) => t.create(n));
+    };
+    $('joinBtn').onclick = join;
+    $('codeIn').onkeydown = (e) => {
+      if (e.key === 'Enter') join();
+    };
+    return;
+  }
+
+  const here = seats ? seats.seats.filter((x) => x && x.connected).length : 0;
+  const isHost = !!seats && seats.host === o.me;
+  const status =
+    here < 4
+      ? `Thulla needs four players: ${here} of 4 here.`
+      : isHost
+        ? 'Everyone is here.'
+        : `Everyone is here. Waiting for ${seats ? nm(rotate(seats.host, o.me)) : 'the host'} to deal.`;
+  box.innerHTML = `<div class="end lobby">
+  <h2>Room code <span class="code">${esc(o.table.code)}</span></h2>
+  <div class="tally">Share this code with the other players. ${status}</div>
+  ${isHost ? `<div class="row"><button class="btn primary" type="button" id="startBtn"${here < 4 ? ' disabled' : ''}>Deal</button></div>` : ''}
+</div>`;
+  if (isHost) $('startBtn').onclick = () => o.table.start();
 }
 
 /* ------------------------------------------------------------- controls */
@@ -371,7 +673,8 @@ function renderHand(s: ThullaState) {
 window.addEventListener('resize', () => {
   if (game) render();
 });
-$('newBtn').onclick = newGame;
+$('newBtn').onclick = () => (online ? leaveOnline() : newGame());
+$('onlineBtn').onclick = goOnline;
 const speeds: [number, string][] = [
   [1, 'normal'],
   [2, 'fast'],
@@ -408,6 +711,18 @@ function start(data: Snapshot) {
     schedule();
   } else newGame();
 }
-hot?.snapshot?.(() => ({ game, msg, speed }));
-if (hot?.ready) hot.ready(start);
+hot?.snapshot?.(() => (online ? { speed } : { game, msg, speed }));
+const rejoin = savedTable();
+if (rejoin) {
+  // This tab was at a table before it reloaded: sit back down.
+  goOnline();
+  void request(async (t) => {
+    try {
+      await t.join(rejoin.matchId, rejoin.code, savedName());
+    } catch (e) {
+      saveTable(null);
+      throw e;
+    }
+  });
+} else if (hot?.ready) hot.ready(start);
 else start(hot?.data ?? {});

@@ -93,6 +93,16 @@ button{font:inherit;cursor:pointer}
 .end h2{font-family:var(--display);font-weight:400;font-size:1.45rem;margin:0;color:var(--gold);text-wrap:balance}
 .end ol{margin:0;padding-left:1.3em}
 .end .tally{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+/* online lobby */
+.lobby .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.field{display:flex;flex-direction:column;gap:4px;font-size:.76rem;font-weight:800;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.lobby input{font:inherit;font-size:1rem;color:var(--chalk);background:rgba(0,0,0,.3);border:1px solid rgba(244,241,231,.3);border-radius:10px;padding:6px 11px;width:13em;max-width:100%;letter-spacing:normal;text-transform:none}
+.lobby input:focus-visible{border-color:var(--gold);outline:none}
+#codeIn{text-transform:uppercase;letter-spacing:.18em;width:8.5em}
+#codeIn::placeholder{letter-spacing:normal;text-transform:none}
+.lobby .code{letter-spacing:.12em;color:var(--chalk)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn[hidden]{display:none}
 details{border:1px solid rgba(244,241,231,.2);border-radius:12px;padding:10px 14px}
 summary{cursor:pointer;font-weight:800;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;font-size:.76rem}
 details ol{margin:10px 0 2px;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;max-width:65ch}
@@ -105,6 +115,7 @@ details b{color:var(--gold)}
     <h1>Thulla</h1>
     <div class="hbtns">
       <button class="btn" id="speedBtn" type="button">Speed: normal</button>
+      <button class="btn" id="onlineBtn" type="button">Play online</button>
       <button class="btn primary" id="newBtn" type="button">New game</button>
     </div>
   </header>

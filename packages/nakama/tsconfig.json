@@ -1,0 +1,16 @@
+{
+  "//": "Compiles the match handler and the engine to ES5 CommonJS for scripts/build-nakama.mjs, which bundles them into build/index.js. lib is ES5 only, as in the engine's ES5 check.",
+  "compilerOptions": {
+    "target": "ES5",
+    "lib": ["ES5"],
+    "types": ["nakama-runtime"],
+    "module": "CommonJS",
+    "ignoreDeprecations": "6.0",
+    "strict": true,
+    "noUnusedLocals": true,
+    "outDir": "../../build/nakama-cjs",
+    "rootDir": "..",
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

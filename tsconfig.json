@@ -31,6 +31,10 @@
     "packages/*/src",
     "packages/*/test",
     "apps/web/src",
+    "apps/web/test",
     "scripts/*.ts"
+  ],
+  "exclude": [
+    "packages/nakama/src/match.ts"
   ]
 }

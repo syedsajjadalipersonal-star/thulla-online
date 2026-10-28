@@ -4,8 +4,9 @@ Thulla (also called Bhabhi) for four players, on the way to online multiplayer o
 [Nakama](https://github.com/heroiclabs/nakama) game server hosted on Oracle Cloud's free
 tier, with an Android app.
 
-This repository is **phase 1 of 5**: the Thulla rules are now a standalone engine, and the
-single-player page (you against three bots) runs on it with no visible change.
+This repository is at **phase 2 of 5**: the rules are a standalone engine, the page plays
+against three bots as before, and four players can now play together through a Nakama server
+running on your own PC.
 
 ## Layout
 
@@ -13,8 +14,10 @@ single-player page (you against three bots) runs on it with no visible change.
 | --- | --- |
 | `packages/engine` | The Thulla rules as a pure state machine. ES5-safe, so it can run inside Nakama. |
 | `packages/bot` | The bot. It sees only what its seat could see (a `ThullaView`) and picks a card by Monte Carlo search. |
-| `apps/web` | The single-player table page: classic cards, four seats, animations. |
-| `scripts` | Build, ES5 check and bot self-play scripts. |
+| `packages/nakama` | The Nakama match handler: seats players, runs the engine, sends each player only their own view. ES5-safe. |
+| `apps/web` | The table page: classic cards, four seats, animations. Solo against bots, or online. |
+| `scripts` | Builds, ES5 check, local page server, online smoke test and bot self-play. |
+| `docker-compose.yml` | Nakama and Postgres for playing on your PC. |
 
 ## The engine contract
 
@@ -47,10 +50,26 @@ npm run verify      # typecheck, ES5 check, tests and web build, in that order
 | `npm run check:es5` | Compiles the engine with only the ES5 standard library, then parses the output as ES5 |
 | `npm test` | Engine and bot tests |
 | `npm run build:web` | Builds `dist/index.html`, one self-contained page; open it in a browser to play |
+| `npm run build:nakama` | Builds `packages/nakama/build/index.js`, the ES5 module Nakama loads |
+| `npm run server` | Builds the module and starts Nakama and Postgres in Docker (reloads the module if already running) |
+| `npm run serve` | Serves the built page at http://127.0.0.1:8080 |
+| `npm run smoke:online` | Four scripted players play whole games on the local server and check its behaviour |
 | `npm run selfplay` | Pits the search bot against the quick bot to check bot strength |
 
 TypeScript is pinned to 6.0.3 because TypeScript 7 no longer compiles to ES5, which Nakama's
 JavaScript runtime requires.
+
+## Playing online on your PC
+
+Needs Docker Desktop as well as Node.js.
+
+1. Copy `.env.example` to `.env` and set both passwords to something random.
+2. `npm install`, then `npm run server` to start Nakama, and `npm run build:web` and `npm run serve`.
+3. Open http://127.0.0.1:8080 in four browser tabs (new tabs, not duplicates: each tab is its own player).
+4. In one tab choose **Play online**, then **Open a table**. Join from the other tabs with the room code.
+5. The player who opened the table deals once all four are there.
+
+Nakama's admin console is at http://127.0.0.1:7351 (user `admin`, password from `.env`).
 
 ## What the tests check
 
@@ -60,6 +79,10 @@ JavaScript runtime requires.
 - **Rules:** following suit, first-round discards, thullas and pickups, safe players, passing the lead, and the end of the game.
 - **Redaction:** no seat's view ever contains another seat's hidden cards.
 - **Bot:** always plays a legal card, and loses far less than its fair share against random players.
+- **Online seats:** the page turns server seats so you sit at the bottom, and builds the table from your view alone.
+- **Online smoke test** (against a running server): room codes, a full table, a bad code, a non-host start,
+  out-of-turn and stale moves, a player rejoining with the same seat and hand, and on every message that no
+  player is sent a card from another hand.
 
 The ported bot was also checked against the original single-player bot: over 400 games with
 equal thinking budgets, one ported bot against three originals lost 22% of games, where 25%
@@ -67,8 +90,8 @@ would be even. Its strength is unchanged.
 
 ## Roadmap
 
-1. **Thulla engine** (this phase): rules as a pure engine, built for ES5; today's page runs on it.
-2. **Nakama on your PC:** Docker Compose with Nakama and Postgres, the match handler and room codes.
+1. **Thulla engine** (done): rules as a pure engine, built for ES5; today's page runs on it.
+2. **Nakama on your PC** (done): Docker Compose with Nakama and Postgres, the match handler and room codes.
 3. **Bots and rejoining:** a bot runner fills seats; reconnect tokens bring players back; turn timers.
 4. **Oracle server:** a free Arm server, domain, Caddy, firewall and nightly backups.
 5. **Android app:** a Capacitor app, and Google Play's 12-tester closed test.

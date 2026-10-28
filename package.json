@@ -2,24 +2,34 @@
   "name": "thulla-online",
   "version": "0.1.0",
   "private": true,
-  "description": "Thulla card game: rules engine, bots and table UI, on the way to online multiplayer with Nakama.",
+  "description": "Thulla card game: rules engine, bots and table UI, played online through a Nakama server.",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p packages/nakama/tsconfig.json --noEmit",
     "check:es5": "tsc -p packages/engine/tsconfig.es5.json && node scripts/check-es5.mjs",
-    "test": "tsx --test packages/engine/test/*.test.ts packages/bot/test/*.test.ts",
+    "test": "tsx --test packages/engine/test/*.test.ts packages/bot/test/*.test.ts apps/web/test/*.test.ts",
     "build:web": "node scripts/build-web.mjs",
+    "build:nakama": "node scripts/build-nakama.mjs",
+    "server": "npm run build:nakama && docker compose up -d && docker compose restart nakama",
+    "server:logs": "docker compose logs -f nakama",
+    "server:stop": "docker compose down",
+    "serve": "node scripts/serve.mjs",
+    "smoke:online": "tsx scripts/online-smoke.ts",
     "selfplay": "tsx scripts/selfplay.ts",
-    "verify": "npm run typecheck && npm run check:es5 && npm test && npm run build:web"
+    "verify": "npm run typecheck && npm run check:es5 && npm test && npm run build:nakama && npm run build:web"
   },
   "devDependencies": {
     "@types/node": "26.6.3",
     "acorn": "8.18.0",
     "esbuild": "0.28.2",
+    "nakama-runtime": "github:heroiclabs/nakama-common#v1.48.0",
     "tsx": "4.23.12",
     "typescript": "6.0.3"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@heroiclabs/nakama-js": "2.8.0"
   }
 }

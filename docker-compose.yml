@@ -1,0 +1,55 @@
+# Nakama and Postgres for local development. Start with `npm run server`.
+# Passwords come from .env (copy .env.example). Ports are bound to this PC only.
+# Both images publish amd64 and arm64 builds, so the same file runs on Oracle's Arm server.
+name: thulla
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: nakama
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "nakama"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  nakama:
+    image: heroiclabs/nakama:3.41.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - >
+        /nakama/nakama migrate up --database.address "postgres:$$POSTGRES_PASSWORD@postgres:5432/nakama" &&
+        exec /nakama/nakama
+        --name thulla
+        --database.address "postgres:$$POSTGRES_PASSWORD@postgres:5432/nakama"
+        --logger.level INFO
+        --session.token_expiry_sec 7200
+        --runtime.js_entrypoint index.js
+        --console.username admin
+        --console.password "$$NAKAMA_CONSOLE_PASSWORD"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      NAKAMA_CONSOLE_PASSWORD: ${NAKAMA_CONSOLE_PASSWORD:?set NAKAMA_CONSOLE_PASSWORD in .env}
+    volumes:
+      - ./packages/nakama/build:/nakama/data/modules:ro
+    ports:
+      - "127.0.0.1:7350:7350" # client API and sockets
+      - "127.0.0.1:7351:7351" # admin console
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
