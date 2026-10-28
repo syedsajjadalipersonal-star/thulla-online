@@ -34,7 +34,7 @@ import {
   serverAddress,
   stateFromView,
 } from './online';
-import type { EventMessage, SeatsMessage } from '../../../packages/nakama/src/protocol';
+import type { EventMessage, SeatInfo, SeatsMessage, TurnInfo } from '../../../packages/nakama/src/protocol';
 
 declare const BOT_WORKER_SOURCE: string;
 
@@ -64,6 +64,8 @@ let thinking = false;
 let speed = 1;
 let gameId = 0;
 let timer: ReturnType<typeof setTimeout> | undefined;
+/** Online: why a card was played for someone; shown until the trick ends, so it can be read. */
+let notice = '';
 
 function loadTally(): { played: number; lost: number } {
   try {
@@ -197,9 +199,11 @@ function play(seat: number, card: Card) {
  */
 function showMove(before: ThullaState, seat: number, card: Card, events: ThullaEvent[], next: () => void) {
   const ended = events.filter((e) => e.type === 'pickup' || e.type === 'trickToPile');
+  const note = notice;
+  if (ended.length) notice = '';
 
   if (!ended.length) {
-    msg = game.turn === 0 ? 'Your turn.' : '';
+    msg = (note ? note + ' ' : '') + (game.turn === 0 ? 'Your turn.' : '');
     render();
     next();
     return;
@@ -235,22 +239,25 @@ function showMove(before: ThullaState, seat: number, card: Card, events: ThullaE
 
 /** Turn the end-of-trick events into the message under the table. */
 function describe(events: ThullaEvent[]): string {
-  let text = '';
+  // The engine reports the pickup, then anyone now safe, then the next lead.
+  const lead = events.find((e) => e.type === 'lead');
+  const s = (p: number) => (p === 0 ? '' : 's');
+  let pickedLead = false;
+  const parts: string[] = [];
   for (const e of events) {
     if (e.type === 'pickup') {
       const top = e.seat;
-      text = `${e.cutter === 0 ? 'You' : nm(e.cutter)} hit ${top === 0 ? '<b>you</b>' : B(top)} with a thulla. ${top === 0 ? 'You pick' : nm(top) + ' picks'} up ${e.cards.length} cards`;
+      pickedLead = !!lead && lead.seat === top;
+      const and = pickedLead ? ` and lead${s(top)}` : '';
+      parts.push(`${e.cutter === 0 ? 'You' : nm(e.cutter)} hit ${top === 0 ? '<b>you</b>' : B(top)} with a thulla. ${top === 0 ? 'You pick' : nm(top) + ' picks'} up ${e.cards.length} cards${and}.`);
     } else if (e.type === 'trickToPile') {
-      text = 'Trick goes to the pile.';
-    } else if (e.type === 'lead') {
-      const picked = events.some((x) => x.type === 'pickup' && x.seat === e.seat);
-      text += picked ? ` and lead${e.seat === 0 ? '' : 's'}.` : ` ${B(e.seat)} lead${e.seat === 0 ? '' : 's'} next.`;
+      parts.push('Trick goes to the pile.');
     } else if (e.type === 'safe') {
-      text += e.seat === 0 ? " <b>You're safe!</b>" : ` ${B(e.seat)} is safe.`;
+      parts.push(e.seat === 0 ? "<b>You're safe!</b>" : `${B(e.seat)} is safe.`);
     }
   }
-  if (events.some((e) => e.type === 'pickup') && !events.some((e) => e.type === 'lead')) text += '.';
-  return text.trim();
+  if (lead && !pickedLead) parts.push(`${B(lead.seat)} lead${s(lead.seat)} next.`);
+  return parts.join(' ');
 }
 
 /* --------------------------------------------------------------- render */
@@ -263,12 +270,19 @@ function seatStatus(s: ThullaState, i: number): string {
   if (s.over && s.loser === i) return 'Lost';
   const place = s.finished.indexOf(i);
   if (place >= 0) return 'Safe · ' + PLACE[place];
+  const turn = !s.over && !pause && s.turn === i;
   if (online) {
-    const info = online.seats?.seats[seatAt(i, Math.max(0, online.me))];
-    if (!info) return i === 0 ? ' ' : 'Waiting…';
-    if (!info.connected) return 'Away';
+    const info = seatInfo(i);
+    if (!info) return i === 0 ? ' ' : 'Waiting…';
+    if (info.bot) return turn ? 'Bot playing' : i === 0 ? 'Bot playing for you' : 'Bot';
+    if (turn) {
+      const left = secondsLeft();
+      if (left < 0) return i === 0 ? 'Your turn' : 'Playing';
+      return i === 0 ? `Your turn · ${left}s` : info.connected ? `${left}s left` : `Away · ${left}s`;
+    }
+    return info.connected ? ' ' : 'Away';
   }
-  if (!s.over && !pause && s.turn === i) return i === 0 ? 'Your turn' : thinking ? 'Thinking…' : 'Playing';
+  if (turn) return i === 0 ? 'Your turn' : thinking ? 'Thinking…' : 'Playing';
   return ' ';
 }
 
@@ -293,6 +307,12 @@ function renderFan(el: HTMLElement, n: number, vertical: boolean) {
 
 function render() {
   const s = pause ? pause.shown : game;
+  renderSeats(s);
+  renderTrick(s);
+}
+
+/** Names, statuses and the backs of the other hands. Online, this runs every second for the turn clock. */
+function renderSeats(s: ThullaState) {
   for (let i = 0; i < 4; i++) {
     const seat = $('seat' + i);
     seat.className =
@@ -305,7 +325,9 @@ function render() {
     (seat.querySelector('small') as HTMLElement).textContent = seatStatus(s, i);
     if (i > 0) renderFan(seat.querySelector('.fan') as HTMLElement, s.hands[i].length, i !== 2);
   }
+}
 
+function renderTrick(s: ThullaState) {
   const center = $('center');
   const want = new Set(s.trick.map((t) => t.seat + ':' + t.card));
   Array.from(center.children).forEach((ch) => {
@@ -345,26 +367,32 @@ function render() {
   if (online && !online.started) {
     renderLobby(endBox);
   } else if (s.over) {
+    // Online, seats can change hands after a game; the result keeps the names it was played with.
+    const who = (p: number) => (online && online.finishedNames ? online.finishedNames[p] : nm(p));
     const head =
       s.loser === 0
         ? "You're left holding cards. You lose this one."
         : s.loser < 0
           ? 'Everyone went out together. No loser.'
-          : `${nm(s.loser)} is left holding cards. You survived!`;
+          : `${who(s.loser)} is left holding cards. You survived!`;
     const order =
-      s.finished.map((i) => `<li>${i === 0 ? '<b>You</b>' : nm(i)}</li>`).join('') +
-      (s.loser >= 0 ? `<li>${s.loser === 0 ? '<b>You</b>' : nm(s.loser)} (lost)</li>` : '');
-    const again = '<div><button class="btn primary" type="button" id="againBtn">Deal again</button></div>';
-    let tail: string;
+      s.finished.map((i) => `<li>${i === 0 ? '<b>You</b>' : who(i)}</li>`).join('') +
+      (s.loser >= 0 ? `<li>${s.loser === 0 ? '<b>You</b>' : who(s.loser)} (lost)</li>` : '');
     if (!online) {
       const t = loadTally();
-      tail = `<div class="tally">Games on this device: ${t.played} · Lost: ${t.lost}</div>${again}`;
-    } else if (online.seats && online.seats.host === online.me) tail = again;
-    else tail = `<div class="tally">Waiting for ${online.seats ? nm(rotate(online.seats.host, online.me)) : 'the host'} to deal again.</div>`;
-    endBox.innerHTML = `<div class="end"><h2>${head}</h2><ol>${order}</ol>${tail}</div>`;
-    const btn = document.getElementById('againBtn');
-    if (btn) btn.onclick = online ? () => online?.table.start() : newGame;
+      endBox.innerHTML = `<div class="end"><h2>${head}</h2><ol>${order}</ol><div class="tally">Games on this device: ${t.played} · Lost: ${t.lost}</div><div><button class="btn primary" type="button" id="againBtn">Deal again</button></div></div>`;
+      $('againBtn').onclick = newGame;
+    } else {
+      endBox.innerHTML = `<div class="end lobby"><h2>${head}</h2><ol>${order}</ol>${dealControls()}</div>`;
+      wireDealControls();
+    }
     lobbyKey = '';
+  } else if (online && seatInfo(0)?.bot) {
+    // Built once, so the button stays put while the bot keeps playing.
+    if (lobbyKey === 'bot') return renderHand(s);
+    lobbyKey = 'bot';
+    endBox.innerHTML = `<div class="end"><h2>A bot is playing for you</h2><div class="tally">Time ran out on three of your turns in a row, so a bot took over your seat.</div><div><button class="btn primary" type="button" id="backBtn">Take my seat back</button></div></div>`;
+    $('backBtn').onclick = () => online?.table.takeBack();
   } else {
     endBox.innerHTML = '';
     lobbyKey = '';
@@ -430,6 +458,10 @@ interface Online {
   started: boolean;
   connected: boolean;
   busy: boolean;
+  /** When the awaited move is due, on this device's clock; 0 when nothing is awaited. */
+  deadline: number;
+  /** Names at the table when the last game ended. */
+  finishedNames: string[] | null;
 }
 
 let online: Online | null = null;
@@ -450,6 +482,8 @@ function goOnline() {
     started: false,
     connected: false,
     busy: false,
+    deadline: 0,
+    finishedNames: null,
   };
   o.table.handlers = {
     welcome: (w) => {
@@ -461,9 +495,12 @@ function goOnline() {
       o.seq = w.seq;
       o.seats = w;
       o.queue = [];
+      notice = '';
       o.started = !!w.view;
       game = w.view ? stateFromView(w.view, o.me) : emptyState();
+      o.finishedNames = null;
       o.legal = w.view ? w.view.legal : [];
+      setDeadline(o, w);
       updateNames();
       msg = !w.view || game.over ? '' : w.seq === 0 ? openingMessage() : game.turn === 0 ? 'Your turn.' : '';
       render();
@@ -480,7 +517,9 @@ function goOnline() {
       drainMoves();
     },
     prompt: (p) => {
-      if (o !== online || pause || o.queue.length) return;
+      if (o !== online) return;
+      setDeadline(o, p);
+      if (pause || o.queue.length) return;
       o.legal = p.legal;
       render();
     },
@@ -545,11 +584,16 @@ function drainMoves() {
     return;
   }
   o.seq = e.seq;
+  if (e.view.over && !o.finishedNames) o.finishedNames = NAMES.slice();
   const events = rotateEvents(e.events, o.me);
   const before = game;
   game = stateFromView(e.view, o.me);
   o.legal = e.view.legal;
+  setDeadline(o, e);
   const first = events[0];
+  if (first && first.type === 'played' && e.timedOut) {
+    notice = first.seat === 0 ? 'Time ran out, so a random card was played for <b>you</b>.' : `Time ran out for ${B(first.seat)}, so a random card was played.`;
+  }
   if (first && first.type === 'played') showMove(before, first.seat, first.card, events, drainMoves);
   else {
     render();
@@ -583,9 +627,16 @@ function reconnect(o: Online, tries: number) {
     try {
       await table.connect();
       await table.join(saved.matchId, saved.code, savedName());
+      void o.table.leave();
       o.table = table;
-    } catch {
-      if (tries < 5) reconnect(o, tries + 1);
+    } catch (e) {
+      // Close this attempt's socket: browsers stop opening new ones when too many are left open.
+      void table.leave();
+      if (/not found/i.test(await errorText(e))) {
+        saveTable(null);
+        msg = 'That table has closed.';
+        render();
+      } else if (tries < 5) reconnect(o, tries + 1);
       else {
         msg = 'Could not get back to the table. Leave it and try again.';
         render();
@@ -652,21 +703,73 @@ function renderLobby(box: HTMLElement) {
     return;
   }
 
-  const here = seats ? seats.seats.filter((x) => x && x.connected).length : 0;
-  const isHost = !!seats && seats.host === o.me;
-  const status =
-    here < 4
-      ? `Thulla needs four players: ${here} of 4 here.`
-      : isHost
-        ? 'Everyone is here.'
-        : `Everyone is here. Waiting for ${seats ? nm(rotate(seats.host, o.me)) : 'the host'} to deal.`;
   box.innerHTML = `<div class="end lobby">
   <h2>Room code <span class="code">${esc(o.table.code)}</span></h2>
-  <div class="tally">Share this code with the other players. ${status}</div>
-  ${isHost ? `<div class="row"><button class="btn primary" type="button" id="startBtn"${here < 4 ? ' disabled' : ''}>Deal</button></div>` : ''}
+  <div class="tally">Share this code with the other players.</div>
+  ${dealControls()}
 </div>`;
-  if (isHost) $('startBtn').onclick = () => o.table.start();
+  wireDealControls();
 }
+
+const plural = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
+
+/** Who is here, and the way to a deal: four people, or bots in the empty seats once everyone here agrees. */
+function dealControls(): string {
+  const o = online as Online;
+  const seats = o.seats;
+  if (!seats) return '';
+  const here = seats.seats.filter((x) => x && x.connected).length;
+  const bots = 4 - here;
+  const host = nm(rotate(seats.host, o.me));
+  const v = seats.vote;
+  if (v) {
+    if (v.from === o.me) return `<div class="tally">Waiting for everyone to agree to deal with ${plural(bots, 'bot')}: ${v.agreed.length} of ${v.voters.length} so far.</div>`;
+    if (v.voters.indexOf(o.me) >= 0 && v.agreed.indexOf(o.me) < 0) {
+      return `<div class="tally">${host} wants to deal now, with ${plural(bots, 'bot')} in the empty seat${bots === 1 ? '' : 's'}.</div>
+  <div class="row"><button class="btn primary" type="button" id="agreeBtn">Agree</button><button class="btn" type="button" id="waitBtn">Wait for players</button></div>`;
+    }
+    return '<div class="tally">Waiting for everyone to agree to deal with bots.</div>';
+  }
+  const count = here < 4 ? `${here} of 4 players here. ` : '';
+  if (seats.host !== o.me) return `<div class="tally">${count}Waiting for ${host} to deal.</div>`;
+  const label = o.started ? 'Deal again' : 'Deal';
+  if (here === 4) return `<div class="row"><button class="btn primary" type="button" id="dealBtn">${label}</button></div>`;
+  const agree = here > 1 ? ', if everyone here agrees' : '';
+  return `<div class="tally">${count}Wait for more, or deal now with bots in the empty seats${agree}.</div>
+  <div class="row"><button class="btn primary" type="button" id="botsBtn">${label} with ${plural(bots, 'bot')}</button></div>`;
+}
+
+function wireDealControls() {
+  const o = online;
+  if (!o) return;
+  const on = (id: string, fn: () => void) => {
+    const el = document.getElementById(id);
+    if (el) el.onclick = fn;
+  };
+  on('dealBtn', () => o.table.start());
+  on('botsBtn', () => o.table.start(true));
+  on('agreeBtn', () => o.table.vote(true));
+  on('waitBtn', () => o.table.vote(false));
+}
+
+/** What the server says about the seat at a table position. */
+function seatInfo(position: number): SeatInfo | null {
+  if (!online || !online.seats) return null;
+  return online.seats.seats[seatAt(position, Math.max(0, online.me))];
+}
+
+function setDeadline(o: Online, t: TurnInfo) {
+  o.deadline = t.deadline ? t.deadline - t.now + Date.now() : 0;
+}
+
+function secondsLeft(): number {
+  if (!online || !online.deadline) return -1;
+  return Math.max(0, Math.ceil((online.deadline - Date.now()) / 1000));
+}
+
+setInterval(() => {
+  if (online && online.deadline && game && !game.over) renderSeats(pause ? pause.shown : game);
+}, 1000);
 
 /* ------------------------------------------------------------- controls */
 
@@ -719,9 +822,9 @@ if (rejoin) {
   void request(async (t) => {
     try {
       await t.join(rejoin.matchId, rejoin.code, savedName());
-    } catch (e) {
+    } catch {
       saveTable(null);
-      throw e;
+      throw new Error('That table has closed.');
     }
   });
 } else if (hot?.ready) hot.ready(start);

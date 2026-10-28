@@ -36,9 +36,13 @@ services:
         --runtime.js_entrypoint index.js
         --console.username admin
         --console.password "$$NAKAMA_CONSOLE_PASSWORD"
+        --runtime.env "BOT_SECRET=$$BOT_SECRET"
+        --runtime.env "TURN_SECONDS=$$TURN_SECONDS"
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       NAKAMA_CONSOLE_PASSWORD: ${NAKAMA_CONSOLE_PASSWORD:?set NAKAMA_CONSOLE_PASSWORD in .env}
+      BOT_SECRET: ${BOT_SECRET:?set BOT_SECRET in .env}
+      TURN_SECONDS: ${TURN_SECONDS:-60}
     volumes:
       - ./packages/nakama/build:/nakama/data/modules:ro
     ports:

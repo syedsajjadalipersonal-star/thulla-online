@@ -36,6 +36,7 @@ Cards picked up after a thulla are public knowledge: everyone saw them on the ta
 | `packages/bot` | Monte Carlo bot. Reads only a `ThullaView`. Node and browsers only, not Nakama. |
 | `packages/nakama` | Match handler and server functions (`src/match.ts`), and the message protocol shared with clients (`src/protocol.ts`). ES5-safe. |
 | `apps/web` | The table page: solo against bots, or online. `net.ts` talks to Nakama; `online.ts` turns server seats so you sit at the bottom. |
+| `apps/bots` | The bot runner: a Node process that sends a bot to any seat a table asks for, thinking on worker threads. |
 | `scripts` | Web and Nakama builds, ES5 check, local page server, online smoke test, bot self-play. |
 | `docker-compose.yml` | Nakama 3.41.0 and Postgres 17 for local play. Passwords in `.env` (gitignored; see `.env.example`). |
 
@@ -57,8 +58,10 @@ Cards picked up after a thulla are public knowledge: everyone saw them on the ta
   `ignoreDeprecations: "6.0"` for that reason.
 - **Hidden cards never leave the server.** Clients and bots get `view(state, seat)` only. The redaction
   test in `packages/engine/test` must keep passing. Bots must never receive full state.
-- **Bots do not run inside Nakama.** They simulate hundreds of games per move. Plan: a separate Node.js
-  bot runner that joins matches as an ordinary player over Nakama's JavaScript client and thinks in worker threads.
+- **Bots do not run inside Nakama.** They simulate hundreds of games per move. `apps/bots` runs them as a
+  separate Node.js process: it registers with `BOT_SECRET`, receives a `bot_wanted` notification when a seat
+  needs a bot, and joins that match as an ordinary player for that seat, receiving only that seat's view.
+  Without the runner, bot seats still play: the server plays a random legal card after 3 seconds.
 - **Keep the look.** The table, cards and animations were approved as they are. Change rendering only when asked.
 - **Nakama finds handlers by global name.** `InitModule`, every match handler and every RPC must be global
   functions in `build/index.js`. `scripts/build-nakama.mjs` compiles to ES5 CommonJS, joins the modules behind
@@ -73,7 +76,8 @@ npm run verify      # typecheck, ES5 check, tests, web build
 npm run selfplay -- 100 60   # search bot vs three quick bots; it should lose well under 25%
 
 npm run server        # build the Nakama module, start Nakama + Postgres in Docker, reload the module
-npm run smoke:online -- 3    # four scripted players play 3 games on the local server
+npm run bots          # the bot runner; keep it running in its own terminal
+npm run smoke:online -- 3    # scripted players: 3 four-player games, then the bot, vote and timer scenarios
 npm run serve         # serve dist/ at http://127.0.0.1:8080; open one tab per player
 npm run server:logs   # follow Nakama's log; npm run server:stop to shut it down
 ```
@@ -81,6 +85,9 @@ npm run server:logs   # follow Nakama's log; npm run server:stop to shut it down
 Each browser tab signs in as its own player (the device id is in sessionStorage), so open new tabs
 rather than duplicating one: a duplicated tab copies sessionStorage and becomes the same player.
 A reloaded tab sits back down at its table. `?server=host:port` points the page at another Nakama.
+
+The timer scenarios in the smoke test need short turns: `TURN_SECONDS=3 npm run server` and
+`BOT_THINK_MS=150 BOT_MIN_MOVE_MS=50 npm run bots`, then `npm run server` again to go back to 60 seconds.
 
 Bot strength reference: over 400 games with equal budgets, one ported bot against three copies of the
 original single-player bot lost 22% (even is 25%). Run a comparison like this after any bot change.
@@ -91,8 +98,8 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
 | --- | --- | --- | --- |
 | 1. Thulla engine | Pure engine built for ES5; the page runs on it | Page plays as before; replays match | Done |
 | 2. Nakama on your PC | Docker Compose with Nakama and Postgres; match handler; room codes | Four browser tabs finish a game | Done |
-| 3. Bots and rejoining | Bot runner; reconnect tokens; turn timers | A dropped player rejoins and reclaims the seat | Next |
-| 4. Oracle server | Arm server, domain, Caddy, firewall, nightly backups | The table opens over HTTPS from any phone | |
+| 3. Bots and rejoining | Bot runner; reconnect tokens; turn timers | A dropped player rejoins and reclaims the seat | Done |
+| 4. Oracle server | Arm server, domain, Caddy, firewall, nightly backups | The table opens over HTTPS from any phone | Next |
 | 5. Android app | Capacitor app; Google Play 12-tester, 14-day closed test | The app goes on Google Play | |
 
 ### Phase 2 checklist
@@ -111,20 +118,37 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
 - [x] Online mode in `apps/web` using Nakama's JavaScript client (`@heroiclabs/nakama-js` 2.8.0), reusing the table UI.
 - [x] Nakama's console password comes from `.env`, not the default.
 
-Phase 2 behaviour to revisit in Phase 3: the game needs four connected players to start; a player who
-drops keeps their seat (shown as "Away") and the game waits for them; a table with nobody connected closes after two minutes.
+### Phase 3: decided by the owner, and how it is built
+
+- **Turn timer: 60 seconds** (`TURN_SECONDS`). When it runs out, the server plays a random legal card for
+  that seat (`event.timedOut` is true). This applies whether the player is connected or away.
+- **Three timed-out turns in a row and a bot takes over** the seat. Playing a card yourself resets the count.
+- **A player can take their seat back mid-game**: automatically when they reconnect, or with "Take my seat
+  back" (opcode 5) if they never left. The bot is sent opcode 15 `released` and leaves.
+- **Dealing with fewer than four needs everyone's agreement.** The host sends `start {bots: true}`; every other
+  connected player gets a vote (opcode 4 `vote {agree}`); one "no", someone joining or leaving, or 30 seconds
+  without all answers cancels it. A host alone at the table can deal with bots straight away. Bots that fill
+  empty seats are named Bilal, Hina, Zara (then Kamran), as in the solo game.
+- Reconnect tokens were not needed: a tab's device id (sessionStorage) is its identity, so the same tab
+  reconnecting is the same player. A phone app will keep its device id in its own storage.
+- Protocol additions: `welcome`, `event` and `prompt` carry `deadline` and `now` (server clock, so clients can
+  correct for their own); `seats` carries each seat's `bot` flag and the open `vote`.
+- After a game, seats are kept for their owners. When someone new sits down, bot seats and seats whose owner
+  left are freed and the finished game is dropped, so a newcomer is never shown cards left in a seat.
+- A table with nobody connected closes after two minutes.
 
 ### Before Phase 4 (production)
 
 - Nakama warns about default `socket.server_key`, `session.encryption_key`, `session.refresh_encryption_key`,
   `console.signing_key` and `runtime.http_key`. Set all of them in `.env`, and change `serverKey` in `apps/web/src/online.ts` to match.
 - Ports are bound to 127.0.0.1 in `docker-compose.yml`. Production exposes only Caddy (HTTPS) in front of 7350, never the console on 7351.
+- The bot runner needs to run on the server too (a `bots` service in Compose, or a systemd unit), with
+  `BOT_SECRET` and `NAKAMA_SERVER_KEY` matching Nakama.
 
 ## Open questions (ask the owner)
 
-- Turn timer length, and the grace period before a bot stands in for a dropped player.
-- Whether the host may start with fewer than four people once bots can fill seats.
-- Whether a player who left can take back their seat mid-game.
+- Whether a player who is away (disconnected) should get a shorter timer than 60 seconds per turn
+  before the three skips run out; today a dropped player costs the table up to three minutes.
 - Domain name: an owned domain, or a free dynamic DNS name.
 - Whether upgrading the Oracle account to Pay As You Go avoids idle reclamation while staying free.
 - Which Google Play developer account to publish under.

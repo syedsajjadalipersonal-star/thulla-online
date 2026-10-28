@@ -8,9 +8,12 @@ import {
   OP_PLAY,
   OP_PROMPT,
   OP_REJECTED,
+  OP_RELEASED,
   OP_RESYNC,
   OP_SEATS,
   OP_START,
+  OP_TAKE_BACK,
+  OP_VOTE,
   OP_WELCOME,
   type CreateTableResponse,
   type EventMessage,
@@ -34,6 +37,8 @@ export interface TableHandlers {
   prompt?(msg: PromptMessage): void;
   rejected?(msg: RejectedMessage): void;
   seats?(msg: SeatsMessage): void;
+  /** For bots: the seat is no longer theirs. */
+  released?(): void;
   disconnected?(): void;
 }
 
@@ -54,6 +59,8 @@ export class Table {
 
   /** Signs in with this device id, creating the account on first use, and opens the socket. */
   async connect(): Promise<void> {
+    this.socket?.disconnect(false);
+    this.socket = null;
     this.session = await this.client.authenticateDevice(this.deviceId, true);
     const socket = this.client.createSocket(this.server.ssl, false);
     socket.onmatchdata = (m) => this.receive(m.op_code, new TextDecoder().decode(m.data));
@@ -75,15 +82,24 @@ export class Table {
   }
 
   /** Joins a match directly, as when coming back to a table after a reload. */
-  async join(matchId: string, code: string, name: string): Promise<void> {
+  async join(matchId: string, code: string, name: string, extra: Record<string, string> = {}): Promise<void> {
     if (!this.socket) throw new Error('Not connected.');
-    await this.socket.joinMatch(matchId, undefined, { name });
+    await this.socket.joinMatch(matchId, undefined, { ...extra, name });
     this.matchId = matchId;
     this.code = code;
   }
 
-  start(): void {
-    this.send(OP_START, {});
+  /** Deals. With `bots`, empty seats get bots, once every other player agrees. */
+  start(bots = false): void {
+    this.send(OP_START, { bots });
+  }
+
+  vote(agree: boolean): void {
+    this.send(OP_VOTE, { agree });
+  }
+
+  takeBack(): void {
+    this.send(OP_TAKE_BACK, {});
   }
 
   play(card: number, seq: number): void {
@@ -119,6 +135,7 @@ export class Table {
     else if (opCode === OP_PROMPT) h.prompt?.(body);
     else if (opCode === OP_REJECTED) h.rejected?.(body);
     else if (opCode === OP_SEATS) h.seats?.(body);
+    else if (opCode === OP_RELEASED) h.released?.();
   }
 
   private requireSession(): Session {

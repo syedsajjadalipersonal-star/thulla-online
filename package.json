@@ -13,6 +13,7 @@
     "server": "npm run build:nakama && docker compose up -d && docker compose restart nakama",
     "server:logs": "docker compose logs -f nakama",
     "server:stop": "docker compose down",
+    "bots": "tsx apps/bots/src/runner.ts",
     "serve": "node scripts/serve.mjs",
     "smoke:online": "tsx scripts/online-smoke.ts",
     "selfplay": "tsx scripts/selfplay.ts",

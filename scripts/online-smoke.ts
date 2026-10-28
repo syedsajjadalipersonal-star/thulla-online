@@ -1,13 +1,16 @@
 // Plays whole games on the local Nakama server with four scripted players, and checks
 // that the table behaves: room codes, seating, turn order, rejections, rejoining, and that
-// no player ever receives a card from another player's hand.
+// no player ever receives a card from another player's hand. Then the Phase 3 behaviour: dealing
+// with bots (alone, and after a vote), the turn timer, a bot taking over after three missed turns,
+// and taking the seat back by button and by reconnecting.
 //
-//   npm run server        (in another terminal, or once: it keeps running)
+//   npm run server        (once: it keeps running; TURN_SECONDS=3 in .env makes the timer tests quick)
+//   npm run bots          (in another terminal)
 //   npm run smoke:online -- 3
 import { randomBytes } from 'node:crypto';
 import { SEATS, type Card, type ThullaView } from '@thulla/engine';
 import { Table, errorText, type ServerAddress } from '../apps/web/src/net';
-import type { WelcomeMessage } from '../packages/nakama/src/protocol';
+import type { SeatsMessage, WelcomeMessage } from '../packages/nakama/src/protocol';
 
 const server: ServerAddress = { host: '127.0.0.1', port: '7350', ssl: false, serverKey: 'defaultkey' };
 const games = Number(process.argv[2] || 1);
@@ -22,6 +25,12 @@ interface Player {
   dealt: Set<Card>;
   rejected: string[];
   welcome: WelcomeMessage | null;
+  seats: SeatsMessage | null;
+  /** Who played each move this player saw, and whether the server played it after a timeout. */
+  moves: { seat: number; timedOut: boolean }[];
+  /** Leave turns alone, to let the timer run out. */
+  idle: boolean;
+  playedAt: number;
 }
 
 function fail(message: string): never {
@@ -55,6 +64,7 @@ function attach(p: Player) {
   p.table.handlers = {
     welcome: (w) => {
       p.welcome = w;
+      p.seats = w;
       p.seat = w.seat;
       p.seq = w.seq;
       track(p, w.view);
@@ -63,13 +73,16 @@ function attach(p: Player) {
       if (e.seq !== p.seq + 1) fail(`Seat ${p.seat} expected move ${p.seq + 1} and got ${e.seq}`);
       p.seq = e.seq;
       track(p, e.view);
+      const first = e.events[0];
+      if (first && first.type === 'played') p.moves.push({ seat: first.seat, timedOut: e.timedOut });
     },
+    seats: (m) => (p.seats = m),
     rejected: (r) => p.rejected.push(r.reason),
   };
 }
 
 async function newPlayer(name: string, deviceId = randomBytes(16).toString('hex')): Promise<Player> {
-  const p: Player = { table: new Table(server, deviceId), deviceId, seat: -1, seq: 0, view: null, dealt: new Set(), rejected: [], welcome: null };
+  const p: Player = { table: new Table(server, deviceId), deviceId, seat: -1, seq: 0, view: null, dealt: new Set(), rejected: [], welcome: null, seats: null, moves: [], idle: false, playedAt: -1 };
   attach(p);
   await p.table.connect();
   return p;
@@ -134,11 +147,12 @@ async function playGame(n: number) {
       rejoined = true;
       const i = players.indexOf(mover);
       const hand = mover.view!.hand.join(',');
+      const matchId = players[0].table.matchId;
       await mover.table.leave();
       await wait(300);
       const back = await newPlayer('again', mover.deviceId);
       back.dealt = mover.dealt;
-      await back.table.join(mover.table.matchId || players[0].table.matchId, code, 'again');
+      await back.table.join(matchId, code, 'again');
       await until('the rejoin welcome', () => !!back.welcome);
       if (back.seat !== mover.seat || back.view!.hand.join(',') !== hand) fail('Rejoining did not restore the seat and hand');
       players[i] = back;
@@ -157,6 +171,133 @@ async function playGame(n: number) {
   for (const p of players) await p.table.leave();
 }
 
+/* ------------------------------------------------------------ Phase 3 */
+
+/** Plays a random legal card for every player whose turn it is, unless it is idle. */
+function drive(players: Player[]) {
+  const timer = setInterval(() => {
+    for (const p of players) {
+      const v = p.view;
+      if (p.idle || !v || v.over || v.turn !== p.seat || !v.legal.length || p.playedAt === p.seq) continue;
+      if (p.seats?.seats[p.seat]?.bot) continue;
+      p.playedAt = p.seq;
+      p.table.play(v.legal[Math.floor(Math.random() * v.legal.length)], p.seq);
+    }
+  }, 20);
+  return () => clearInterval(timer);
+}
+
+async function table(names: string[]): Promise<Player[]> {
+  const players = [await newPlayer(names[0])];
+  await players[0].table.create(names[0]);
+  for (const name of names.slice(1)) {
+    const p = await newPlayer(name);
+    await p.table.joinByCode(players[0].table.code, name);
+    players.push(p);
+  }
+  await until('everyone seated', () => players.every((p) => p.seats && p.seats.seats.filter((x) => x && x.connected).length === names.length));
+  return players;
+}
+
+async function dealAloneWithBots() {
+  const [ann] = await table(['Ann']);
+  ann.table.start();
+  await until('a deal without bots to be refused', () => ann.rejected.some((r) => /four players/.test(r)));
+  ann.table.start(true);
+  await until('the deal with bots', () => !!ann.view);
+  const bots = ann.seats!.seats.filter((x) => x && x.bot).map((x) => x!.name);
+  if (bots.length !== 3) fail('Expected three bots, got ' + JSON.stringify(ann.seats));
+  const stop = drive([ann]);
+  await until('the game with bots to finish', () => ann.view!.over, 180000);
+  stop();
+  const byBots = ann.moves.filter((m) => m.seat !== ann.seat);
+  const real = byBots.filter((m) => !m.timedOut).length;
+  console.log(`Alone with bots (${bots.join(', ')}): ${ann.moves.length} moves, ${real} of ${byBots.length} bot moves made by the bot runner`);
+  if (!real) fail('No bot runner moves: is `npm run bots` running?');
+
+  // Someone new sits down after the game: they must not be shown the finished game or its cards.
+  const ed = await newPlayer('Ed');
+  await ed.table.joinByCode(ann.table.code, 'Ed');
+  await until('Ed to be seated', () => !!ed.welcome);
+  if (ed.welcome!.view) fail('A newcomer was sent the finished game');
+  await until('the bots to leave', () => ann.seats!.seats.filter((x) => x).length === 2);
+  console.log('After the game: the bots left, and a newcomer saw a fresh table');
+  await ed.table.leave();
+  await ann.table.leave();
+}
+
+async function voteForBots() {
+  const [ann, bo] = await table(['Ann', 'Bo']);
+  ann.table.start(true);
+  await until('Bo to be asked', () => !!bo.seats?.vote && bo.seats.vote.voters.indexOf(bo.seat) >= 0);
+  bo.table.vote(false);
+  await until('Ann to hear Bo would rather wait', () => ann.rejected.some((r) => /rather wait/.test(r)));
+  if (ann.view) fail('Dealt despite a refusal');
+  ann.table.start(true);
+  await until('Bo to be asked again', () => !!bo.seats?.vote);
+  bo.table.vote(true);
+  await until('the deal after agreeing', () => !!ann.view && !!bo.view);
+  const bots = ann.seats!.seats.filter((x) => x && x.bot).length;
+  if (bots !== 2) fail(`Expected two bots after the vote, got ${bots}`);
+  console.log('Vote: a refusal kept the cards in the box; agreement dealt with two bots');
+  await ann.table.leave();
+  await bo.table.leave();
+}
+
+async function timerAndTakeover() {
+  const players = await table(['Ann', 'Bo', 'Cy', 'Di']);
+  const [ann, , , di] = players;
+  ann.table.start();
+  await until('the deal', () => players.every((p) => p.view));
+  const turnMs = ann.welcome!.deadline - ann.welcome!.now;
+  if (turnMs > 10000) {
+    console.log(`Timer tests skipped: turns last ${Math.round(turnMs / 1000)} s here. Set TURN_SECONDS=3 in .env and run npm run server.`);
+    for (const p of players) await p.table.leave();
+    return;
+  }
+  const stop = drive(players);
+  const diBot = () => !!ann.seats?.seats[di.seat]?.bot;
+  const diMoves = () => ann.moves.filter((m) => m.seat === di.seat);
+
+  // Di sits still: three timed-out turns, then a bot plays for her.
+  di.idle = true;
+  await until('a bot to take over Di', diBot, 60000);
+  const timedOut = diMoves().filter((m) => m.timedOut).length;
+  if (timedOut !== 3) fail(`Expected the bot after 3 timeouts, saw ${timedOut}`);
+  await until('the bot to play for Di', () => diMoves().some((m, i) => i >= 3 && !m.timedOut) || ann.view!.over, 60000);
+
+  // Taking the seat back by button.
+  di.table.takeBack();
+  await until('Di to have her seat back', () => !diBot());
+  di.idle = false;
+  const before = diMoves().length;
+  await until('Di to play for herself', () => diMoves().length > before || ann.view!.over, 30000);
+  console.log(`Timer: ${timedOut} missed turns brought in a bot; Di took the seat back with the button`);
+
+  // Again, and this time Di comes back by reconnecting.
+  if (!ann.view!.over) {
+    di.idle = true;
+    await until('a bot to take over Di again', () => diBot() || ann.view!.over, 60000);
+    if (!ann.view!.over) {
+      await di.table.leave();
+      const back = await newPlayer('Di', di.deviceId);
+      back.dealt = di.dealt;
+      await back.table.join(ann.table.matchId, ann.table.code, 'Di');
+      await until('the seat to come back on rejoining', () => !!back.welcome && !diBot());
+      players[3] = back;
+      console.log('Rejoin: reconnecting gave Di her seat back from the bot');
+    }
+  }
+  stop();
+  const finish = drive(players);
+  await until('the game to finish', () => ann.view!.over, 120000);
+  finish();
+  for (const p of players) await p.table.leave();
+}
+
 for (let n = 0; n < games; n++) await playGame(n);
+await dealAloneWithBots();
+await voteForBots();
+await timerAndTakeover();
 console.log('Online smoke test passed.');
 process.exit(0);

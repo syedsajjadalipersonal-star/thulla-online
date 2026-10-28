@@ -32,6 +32,7 @@
     "packages/*/test",
     "apps/web/src",
     "apps/web/test",
+    "apps/bots/src",
     "scripts/*.ts"
   ],
   "exclude": [

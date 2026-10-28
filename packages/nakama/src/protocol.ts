@@ -10,6 +10,10 @@ export const MODULE_NAME = 'thulla';
 export const OP_START = 1;
 export const OP_PLAY = 2;
 export const OP_RESYNC = 3;
+/** Answer to a request to deal with bots in the empty seats. */
+export const OP_VOTE = 4;
+/** Take your seat back from the bot that is playing it. */
+export const OP_TAKE_BACK = 5;
 
 /** Server to client. */
 export const OP_WELCOME = 10;
@@ -17,8 +21,26 @@ export const OP_EVENT = 11;
 export const OP_PROMPT = 12;
 export const OP_REJECTED = 13;
 export const OP_SEATS = 14;
+/** To a bot: the seat is no longer yours; leave the match. */
+export const OP_RELEASED = 15;
 
-export interface StartMessage {}
+/** Notification sent to the bot runner when a seat needs a bot. */
+export const BOT_WANTED_CODE = 100;
+
+export interface BotWanted {
+  matchId: string;
+  seat: number;
+  name: string;
+}
+
+export interface StartMessage {
+  /** Deal even with empty seats, which bots then fill. Needs every other player to agree. */
+  bots?: boolean;
+}
+
+export interface VoteMessage {
+  agree: boolean;
+}
 
 export interface PlayMessage {
   card: Card;
@@ -32,7 +54,18 @@ export interface ResyncMessage {
 
 export interface SeatInfo {
   name: string;
+  /** The person who owns this seat is connected. False for a seat that only a bot has ever filled. */
   connected: boolean;
+  /** A bot is playing this seat: it was empty at the deal, or its owner missed three turns in a row. */
+  bot: boolean;
+}
+
+/** The host asked to deal with bots in the empty seats; every other player must agree. */
+export interface VoteInfo {
+  from: number;
+  /** Seats whose answer is needed. */
+  voters: number[];
+  agreed: number[];
 }
 
 export interface SeatsMessage {
@@ -41,10 +74,18 @@ export interface SeatsMessage {
   /** Seat of the player who may start the game. */
   host: number;
   started: boolean;
+  vote: VoteInfo | null;
+}
+
+/** Whose move it is and when it is due. Times are server clock milliseconds; `now` lets clients correct for their own clock. */
+export interface TurnInfo {
+  /** 0 when no move is awaited. */
+  deadline: number;
+  now: number;
 }
 
 /** Sent when a player joins, after a resync, and to everyone when a game starts: a full picture. */
-export interface WelcomeMessage extends SeatsMessage {
+export interface WelcomeMessage extends SeatsMessage, TurnInfo {
   seat: number;
   code: string;
   /** Moves applied so far; the next event will carry seq + 1. */
@@ -54,16 +95,16 @@ export interface WelcomeMessage extends SeatsMessage {
 }
 
 /** One move: everything the engine reported for it, and this seat's view afterwards. */
-export interface EventMessage {
+export interface EventMessage extends TurnInfo {
   seq: number;
   events: ThullaEvent[];
   view: ThullaView;
+  /** The mover ran out of time and the server played a random card for them. */
+  timedOut: boolean;
 }
 
-export interface PromptMessage {
+export interface PromptMessage extends TurnInfo {
   legal: Card[];
-  /** When the move is due, in milliseconds since the epoch; 0 means no time limit. */
-  deadline: number;
 }
 
 export interface RejectedMessage {
@@ -77,6 +118,10 @@ export interface CreateTableResponse {
 
 export interface JoinByCodeRequest {
   code: string;
+}
+
+export interface RegisterBotRunnerRequest {
+  secret: string;
 }
 
 export interface JoinByCodeResponse {
