@@ -6,8 +6,8 @@
  * Every rule comes from the engine; this file only seats players, keeps time, routes messages and
  * makes sure each player (or bot) receives its own seat's view and nothing else.
  *
- * Time: each move has TURN_SECONDS (60 unless the runtime env says otherwise). When it runs out the
- * server plays a random legal card. Three timed-out turns in a row and a bot takes over the seat,
+ * Time: each move has TURN_SECONDS (60 unless the runtime env says otherwise), or 30 for a player who
+ * is away (disconnected). When it runs out the server plays a random legal card. Three timed-out turns in a row and a bot takes over the seat,
  * until its owner reconnects or asks for it back.
  */
 import { apply, isIllegalMoveError, setup, view, SEATS, ThullaEvent, ThullaState } from '../../engine/src/index';
@@ -42,6 +42,8 @@ const EMPTY_TICKS = TICK_RATE * 120;
 /** A seat reserved by a join attempt that never completed is freed after this long. */
 const RESERVE_TICKS = TICK_RATE * 10;
 const DEFAULT_TURN_SECONDS = 60;
+/** Turn length for a player who is disconnected. */
+const AWAY_TURN_SECONDS = 30;
 /** Timed-out turns in a row before a bot takes over. */
 const SKIPS_BEFORE_BOT = 3;
 /** A connected bot that has not answered by then gets a random card played for it. */
@@ -217,6 +219,12 @@ export function matchLeave(
         if (running(state) && (state.game as ThullaState).turn === s) startTurnClock(state, tick);
       }
     }
+  }
+  if (running(state)) {
+    // Someone who dropped during their own turn gets the away player's time, not a fresh 60 seconds.
+    const turn = (state.game as ThullaState).turn;
+    const seat = state.seats[turn] as Seat;
+    if (!seat.bot && !seat.presence && state.turnEndsTick - tick > awaySeconds(state) * TICK_RATE) startTurnClock(state, tick);
   }
   if (!presenceAt(state, state.host)) state.host = firstConnected(state);
   if (personLeft) cancelVote(dispatcher, state, 'Someone left, so the vote to deal with bots was dropped.');
@@ -592,9 +600,14 @@ function cancelVote(dispatcher: Dispatcher, state: TableState, reason: string): 
 function startTurnClock(state: TableState, tick: number): void {
   const game = state.game as ThullaState;
   const seat = state.seats[game.turn] as Seat;
-  const seconds = !seat.bot ? state.turnSeconds : seat.botPresence ? BOT_TURN_SECONDS : NO_BOT_SECONDS;
+  let seconds = seat.botPresence ? BOT_TURN_SECONDS : NO_BOT_SECONDS;
+  if (!seat.bot) seconds = seat.presence ? state.turnSeconds : awaySeconds(state);
   state.turnEndsTick = tick + seconds * TICK_RATE;
   state.turnEndsAt = Date.now() + seconds * 1000;
+}
+
+function awaySeconds(state: TableState): number {
+  return Math.min(state.turnSeconds, AWAY_TURN_SECONDS);
 }
 
 /* ------------------------------------------------------------ messages */
@@ -653,6 +666,8 @@ function seatsMessage(state: TableState): SeatsMessage {
     host: state.host,
     started: !!state.game,
     vote: v ? { from: v.from, voters: v.voters.slice(), agreed: v.agreed.slice() } : null,
+    deadline: running(state) ? state.turnEndsAt : 0,
+    now: Date.now(),
   };
 }
 

@@ -508,6 +508,7 @@ function goOnline() {
     seats: (m) => {
       if (o !== online) return;
       o.seats = m;
+      setDeadline(o, m);
       updateNames();
       render();
     },

@@ -68,7 +68,7 @@ export interface VoteInfo {
   agreed: number[];
 }
 
-export interface SeatsMessage {
+export interface SeatsMessage extends TurnInfo {
   /** Indexed by seat; null for an empty seat. */
   seats: (SeatInfo | null)[];
   /** Seat of the player who may start the game. */
@@ -85,7 +85,7 @@ export interface TurnInfo {
 }
 
 /** Sent when a player joins, after a resync, and to everyone when a game starts: a full picture. */
-export interface WelcomeMessage extends SeatsMessage, TurnInfo {
+export interface WelcomeMessage extends SeatsMessage {
   seat: number;
   code: string;
   /** Moves applied so far; the next event will carry seq + 1. */

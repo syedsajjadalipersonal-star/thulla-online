@@ -72,8 +72,8 @@ Needs Docker Desktop as well as Node.js.
 5. The player who opened the table deals once all four are there, or deals sooner with bots in the empty
    seats if everyone at the table agrees. A host on their own can deal straight away against three bots.
 
-Each move has 60 seconds. When time runs out a random card is played for you, and after three in a row a
-bot takes over your seat. Reconnect, or press **Take my seat back**, to play it again.
+Each move has 60 seconds (30 if you have lost your connection). When time runs out a random card is played
+for you, and after three in a row a bot takes over your seat. Reconnect, or press **Take my seat back**, to play it again.
 
 Nakama's admin console is at http://127.0.0.1:7351 (user `admin`, password from `.env`).
 

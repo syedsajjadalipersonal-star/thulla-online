@@ -295,9 +295,31 @@ async function timerAndTakeover() {
   for (const p of players) await p.table.leave();
 }
 
+async function awayTimer() {
+  const players = await table(['Ann', 'Bo', 'Cy', 'Di']);
+  const [ann] = players;
+  ann.table.start();
+  await until('the deal', () => players.every((p) => p.view));
+  const left = (m: { deadline: number; now: number }) => m.deadline - m.now;
+  if (left(ann.welcome!) <= 31000) {
+    console.log('Away timer test skipped: it needs turns longer than 30 s (the normal 60).');
+  } else {
+    // The player whose turn it is drops: the rest of their turn shrinks to 30 seconds.
+    const mover = players.find((p) => p.seat === ann.view!.turn)!;
+    ann.seats = null;
+    await mover.table.leave();
+    await until('the seat to show as away', () => !!ann.seats && !ann.seats.seats[mover.seat]!.connected);
+    const ms = left(ann.seats!);
+    if (ms > 30500 || ms < 25000) fail(`Expected about 30 s for an away player, got ${ms} ms`);
+    console.log(`Away: a player who dropped on their turn has ${Math.round(ms / 1000)} s left, not 60`);
+  }
+  for (const p of players) await p.table.leave();
+}
+
 for (let n = 0; n < games; n++) await playGame(n);
 await dealAloneWithBots();
 await voteForBots();
 await timerAndTakeover();
+await awayTimer();
 console.log('Online smoke test passed.');
 process.exit(0);

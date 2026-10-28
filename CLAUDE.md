@@ -120,8 +120,10 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
 
 ### Phase 3: decided by the owner, and how it is built
 
-- **Turn timer: 60 seconds** (`TURN_SECONDS`). When it runs out, the server plays a random legal card for
-  that seat (`event.timedOut` is true). This applies whether the player is connected or away.
+- **Turn timer: 60 seconds** (`TURN_SECONDS`), **30 seconds for a player who is away** (disconnected). A player
+  who drops during their own turn has what is left cut to 30 seconds; reconnecting does not add time back.
+  When the timer runs out, the server plays a random legal card for that seat (`event.timedOut` is true).
+  `seats` messages carry the current deadline too, so clients see the change.
 - **Three timed-out turns in a row and a bot takes over** the seat. Playing a card yourself resets the count.
 - **A player can take their seat back mid-game**: automatically when they reconnect, or with "Take my seat
   back" (opcode 5) if they never left. The bot is sent opcode 15 `released` and leaves.
@@ -147,8 +149,12 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
 
 ## Open questions (ask the owner)
 
-- Whether a player who is away (disconnected) should get a shorter timer than 60 seconds per turn
-  before the three skips run out; today a dropped player costs the table up to three minutes.
-- Domain name: an owned domain, or a free dynamic DNS name.
-- Whether upgrading the Oracle account to Pay As You Go avoids idle reclamation while staying free.
 - Which Google Play developer account to publish under.
+
+## Phase 4 decisions (owner)
+
+- **No domain owned:** use a free DuckDNS name (for example `thulla.duckdns.org`), with Caddy getting the HTTPS certificate.
+- **Stay on Oracle's Free Tier**, not Pay As You Go. Oracle may reclaim an Always Free instance that stays idle
+  for a week; nightly backups (kept off the server) are the protection, so the server can be rebuilt.
+- The owner has no Oracle account yet. Sign-up, card verification and anything needing their login are done by
+  the owner; Claude writes the setup scripts and walks them through the console.
