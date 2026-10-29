@@ -4,9 +4,9 @@ Thulla (also called Bhabhi) for four players, on the way to online multiplayer o
 [Nakama](https://github.com/heroiclabs/nakama) game server hosted on Oracle Cloud's free
 tier, with an Android app.
 
-This repository is at **phase 3 of 5**: the rules are a standalone engine, the page plays
-against three bots as before, and up to four people can play together through a Nakama server
-running on your own PC, with bots in empty seats, a 60-second turn timer, and rejoining.
+This repository is at **phase 4 of 5**: the rules are a standalone engine, the page plays
+against three bots as before, and up to four people can play together through a Nakama server,
+with bots in empty seats, a 60-second turn timer and rejoining. It is live at https://thulla.duckdns.org.
 
 ## Layout
 
@@ -108,7 +108,7 @@ would be even. Its strength is unchanged.
 1. **Thulla engine** (done): rules as a pure engine, built for ES5; today's page runs on it.
 2. **Nakama on your PC** (done): Docker Compose with Nakama and Postgres, the match handler and room codes.
 3. **Bots and rejoining** (done): a bot runner fills seats; reconnect tokens bring players back; turn timers.
-4. **Oracle server** (live; backups being finished): a free Arm server, domain, Caddy, firewall and nightly backups.
+4. **Oracle server** (done): a free Arm server, domain, Caddy, firewall and nightly backups.
 5. **Android app:** a Capacitor app, and Google Play's 12-tester closed test.
 
 The full design is in the Card Table Multiplayer Design document.

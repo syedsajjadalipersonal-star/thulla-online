@@ -99,8 +99,8 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
 | 1. Thulla engine | Pure engine built for ES5; the page runs on it | Page plays as before; replays match | Done |
 | 2. Nakama on your PC | Docker Compose with Nakama and Postgres; match handler; room codes | Four browser tabs finish a game | Done |
 | 3. Bots and rejoining | Bot runner; reconnect tokens; turn timers | A dropped player rejoins and reclaims the seat | Done |
-| 4. Oracle server | Arm server, domain, Caddy, firewall, nightly backups | The table opens over HTTPS from any phone | Live at https://thulla.duckdns.org; backup link and phone check pending |
-| 5. Android app | Capacitor app; Google Play 12-tester, 14-day closed test | The app goes on Google Play | |
+| 4. Oracle server | Arm server, domain, Caddy, firewall, nightly backups | The table opens over HTTPS from any phone | Done: https://thulla.duckdns.org |
+| 5. Android app | Capacitor app; Google Play 12-tester, 14-day closed test | The app goes on Google Play | Next |
 
 ### Phase 2 checklist
 
@@ -154,7 +154,9 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
   container, restarts). **Admin console:** `ssh -i ~/.ssh/thulla_oracle -L 7351:127.0.0.1:7351 ubuntu@thulla.duckdns.org`,
   then http://127.0.0.1:7351.
 - **Backups:** `deploy/backup.sh` at 03:15 UTC uploads a gzipped `pg_dump` through an upload-only pre-authenticated
-  link (`BACKUP_URL` in `.env`) to an Object Storage bucket, named by day of month (a rolling month).
+  link (`BACKUP_URL` in `.env`) to the `thulla-backups` Object Storage bucket, named by day of month (a rolling
+  month). Running since 2026-10-29; its log is `~/thulla-backup.log`. To change the link, replace the whole
+  `BACKUP_URL=` line in `.env` (the line must keep its `BACKUP_URL=` name) and run `sh deploy/backup.sh` once.
 - **Rebuild after losing the server:** new A1 instance as before, `git clone` the repo to `~/thulla`,
   `sh deploy/setup-server.sh thulla.duckdns.org`, log in again, add `BACKUP_URL` to `.env`, `sh deploy/deploy.sh`,
   restore the latest dump (command in `deploy/backup.sh`), and point DuckDNS at the new IP.
