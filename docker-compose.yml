@@ -1,5 +1,5 @@
-# Nakama and Postgres for local development. Start with `npm run server`.
-# Passwords come from .env (copy .env.example). Ports are bound to this PC only.
+# Nakama and Postgres. Locally: `npm run server`. On the server, deploy/compose.prod.yml adds Caddy and the bots.
+# Passwords and keys come from .env (copy .env.example). Ports are bound to this machine only.
 # Both images publish amd64 and arm64 builds, so the same file runs on Oracle's Arm server.
 name: thulla
 
@@ -34,15 +34,27 @@ services:
         --logger.level INFO
         --session.token_expiry_sec 7200
         --runtime.js_entrypoint index.js
-        --console.username admin
+        --console.username "$$NAKAMA_CONSOLE_USERNAME"
         --console.password "$$NAKAMA_CONSOLE_PASSWORD"
         --runtime.env "BOT_SECRET=$$BOT_SECRET"
         --runtime.env "TURN_SECONDS=$$TURN_SECONDS"
+        --socket.server_key "$$NAKAMA_SERVER_KEY"
+        --session.encryption_key "$$SESSION_ENCRYPTION_KEY"
+        --session.refresh_encryption_key "$$SESSION_REFRESH_ENCRYPTION_KEY"
+        --console.signing_key "$$CONSOLE_SIGNING_KEY"
+        --runtime.http_key "$$RUNTIME_HTTP_KEY"
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      NAKAMA_CONSOLE_USERNAME: ${NAKAMA_CONSOLE_USERNAME:-admin}
       NAKAMA_CONSOLE_PASSWORD: ${NAKAMA_CONSOLE_PASSWORD:?set NAKAMA_CONSOLE_PASSWORD in .env}
       BOT_SECRET: ${BOT_SECRET:?set BOT_SECRET in .env}
       TURN_SECONDS: ${TURN_SECONDS:-60}
+      # Nakama's own defaults, kept for local play; the server's .env sets real values.
+      NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-defaultkey}
+      SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY:-defaultencryptionkey}
+      SESSION_REFRESH_ENCRYPTION_KEY: ${SESSION_REFRESH_ENCRYPTION_KEY:-defaultrefreshencryptionkey}
+      CONSOLE_SIGNING_KEY: ${CONSOLE_SIGNING_KEY:-defaultsigningkey}
+      RUNTIME_HTTP_KEY: ${RUNTIME_HTTP_KEY:-defaulthttpkey}
     volumes:
       - ./packages/nakama/build:/nakama/data/modules:ro
     ports:

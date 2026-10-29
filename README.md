@@ -77,6 +77,13 @@ for you, and after three in a row a bot takes over your seat. Reconnect, or pres
 
 Nakama's admin console is at http://127.0.0.1:7351 (user `admin`, password from `.env`).
 
+## The live server
+
+The table is online at **https://thulla.duckdns.org**, on a free Oracle Cloud Arm server. `deploy/` holds
+everything it runs: `setup-server.sh` prepares a fresh Ubuntu server once, `deploy.sh` updates it to the latest
+`main`, `compose.prod.yml` and `Caddyfile` add HTTPS and the bot runner, and `backup.sh` uploads a nightly
+database backup to Oracle Object Storage. CLAUDE.md has the details, including how to rebuild the server.
+
 ## What the tests check
 
 - **Dealing:** 13 distinct cards each, the same deal for the same seed, and the ace of spades always opens.
@@ -101,7 +108,7 @@ would be even. Its strength is unchanged.
 1. **Thulla engine** (done): rules as a pure engine, built for ES5; today's page runs on it.
 2. **Nakama on your PC** (done): Docker Compose with Nakama and Postgres, the match handler and room codes.
 3. **Bots and rejoining** (done): a bot runner fills seats; reconnect tokens bring players back; turn timers.
-4. **Oracle server:** a free Arm server, domain, Caddy, firewall and nightly backups.
+4. **Oracle server** (live; backups being finished): a free Arm server, domain, Caddy, firewall and nightly backups.
 5. **Android app:** a Capacitor app, and Google Play's 12-tester closed test.
 
 The full design is in the Card Table Multiplayer Design document.

@@ -5,6 +5,9 @@
 import type { ThullaEvent, ThullaState, ThullaView } from '@thulla/engine';
 import type { ServerAddress } from './net';
 
+/** Set by scripts/build-web.mjs from the NAKAMA_SERVER_KEY environment variable. */
+declare const NAKAMA_SERVER_KEY: string;
+
 /** The Nakama server: `?server=host:port` in the page address, else the host that served the page. */
 export function serverAddress(): ServerAddress {
   const ssl = location.protocol === 'https:';
@@ -14,7 +17,7 @@ export function serverAddress(): ServerAddress {
     host: host || location.hostname || '127.0.0.1',
     port: port || (ssl ? '443' : '7350'),
     ssl,
-    serverKey: 'defaultkey',
+    serverKey: typeof NAKAMA_SERVER_KEY === 'string' ? NAKAMA_SERVER_KEY : 'defaultkey',
   };
 }
 

@@ -1,0 +1,43 @@
+# Production additions for the Oracle server, on top of docker-compose.yml:
+#   Caddy: HTTPS for $DOMAIN, serves the page from dist/ and passes /v2 and /ws through to Nakama.
+#   bots:  the bot runner, talking to Nakama over the internal network.
+# Nakama's own ports stay bound to 127.0.0.1; the admin console is reached through an SSH tunnel.
+# Used by deploy/deploy.sh.
+services:
+  caddy:
+    image: caddy:2.11.7-alpine
+    depends_on:
+      nakama:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./dist:/srv/www:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+  bots:
+    image: node:24.22.1-bookworm-slim
+    depends_on:
+      nakama:
+        condition: service_healthy
+    working_dir: /app
+    command: ["node", "node_modules/tsx/dist/cli.mjs", "apps/bots/src/runner.ts"]
+    environment:
+      NAKAMA_HOST: nakama
+      NAKAMA_PORT: "7350"
+      NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:?set NAKAMA_SERVER_KEY in .env}
+      BOT_SECRET: ${BOT_SECRET:?set BOT_SECRET in .env}
+    volumes:
+      - .:/app:ro
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

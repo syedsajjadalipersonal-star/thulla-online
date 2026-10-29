@@ -99,7 +99,7 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
 | 1. Thulla engine | Pure engine built for ES5; the page runs on it | Page plays as before; replays match | Done |
 | 2. Nakama on your PC | Docker Compose with Nakama and Postgres; match handler; room codes | Four browser tabs finish a game | Done |
 | 3. Bots and rejoining | Bot runner; reconnect tokens; turn timers | A dropped player rejoins and reclaims the seat | Done |
-| 4. Oracle server | Arm server, domain, Caddy, firewall, nightly backups | The table opens over HTTPS from any phone | Next |
+| 4. Oracle server | Arm server, domain, Caddy, firewall, nightly backups | The table opens over HTTPS from any phone | Live at https://thulla.duckdns.org; backup link and phone check pending |
 | 5. Android app | Capacitor app; Google Play 12-tester, 14-day closed test | The app goes on Google Play | |
 
 ### Phase 2 checklist
@@ -139,13 +139,26 @@ original single-player bot lost 22% (even is 25%). Run a comparison like this af
   left are freed and the finished game is dropped, so a newcomer is never shown cards left in a seat.
 - A table with nobody connected closes after two minutes.
 
-### Before Phase 4 (production)
+### Production server (Phase 4)
 
-- Nakama warns about default `socket.server_key`, `session.encryption_key`, `session.refresh_encryption_key`,
-  `console.signing_key` and `runtime.http_key`. Set all of them in `.env`, and change `serverKey` in `apps/web/src/online.ts` to match.
-- Ports are bound to 127.0.0.1 in `docker-compose.yml`. Production exposes only Caddy (HTTPS) in front of 7350, never the console on 7351.
-- The bot runner needs to run on the server too (a `bots` service in Compose, or a systemd unit), with
-  `BOT_SECRET` and `NAKAMA_SERVER_KEY` matching Nakama.
+- **Where:** Oracle Cloud Always Free, Ampere A1 (1 OCPU, 6 GB; can be raised to the free limit with Edit → Shape),
+  Ubuntu 24.04 arm64, user `ubuntu`, repo checked out in `~/thulla`. Name: `thulla.duckdns.org` (DuckDNS, owner's account).
+  SSH key: `~/.ssh/thulla_oracle` on the owner's PC.
+- **What runs:** `docker-compose.yml` plus `deploy/compose.prod.yml`: Postgres, Nakama, Caddy (HTTPS, serves `dist/`,
+  proxies `/v2` and `/ws` to Nakama) and the bot runner. All restart by themselves after a reboot.
+- **Secrets** live only in the server's `~/thulla/.env`, written by `deploy/setup-server.sh`: every Nakama key is
+  random, the console user is `owner`. The page gets `NAKAMA_SERVER_KEY` at build time (`scripts/build-web.mjs`).
+- **Firewall:** Oracle's security list allows 22, 80 and 443; the host's iptables allows the same (saved with
+  netfilter-persistent). Nakama's 7350 and 7351 are bound to 127.0.0.1.
+- **Deploy a change:** push to `main`, then on the server `sh deploy/deploy.sh` (pulls, builds in a Node
+  container, restarts). **Admin console:** `ssh -i ~/.ssh/thulla_oracle -L 7351:127.0.0.1:7351 ubuntu@thulla.duckdns.org`,
+  then http://127.0.0.1:7351.
+- **Backups:** `deploy/backup.sh` at 03:15 UTC uploads a gzipped `pg_dump` through an upload-only pre-authenticated
+  link (`BACKUP_URL` in `.env`) to an Object Storage bucket, named by day of month (a rolling month).
+- **Rebuild after losing the server:** new A1 instance as before, `git clone` the repo to `~/thulla`,
+  `sh deploy/setup-server.sh thulla.duckdns.org`, log in again, add `BACKUP_URL` to `.env`, `sh deploy/deploy.sh`,
+  restore the latest dump (command in `deploy/backup.sh`), and point DuckDNS at the new IP.
+- Testing the live server: `NAKAMA_HOST=thulla.duckdns.org NAKAMA_PORT=443 NAKAMA_SSL=true NAKAMA_SERVER_KEY=<from .env> npm run smoke:online`.
 
 ## Open questions (ask the owner)
 

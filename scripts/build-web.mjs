@@ -24,7 +24,8 @@ const app = await build({
   ...common,
   entryPoints: [root + 'apps/web/src/main.ts'],
   format: 'iife',
-  define: { BOT_WORKER_SOURCE: JSON.stringify(workerSource) },
+  // The Nakama server key is public (every client sends it), but a server should not use the default.
+  define: { BOT_WORKER_SOURCE: JSON.stringify(workerSource), NAKAMA_SERVER_KEY: JSON.stringify(process.env.NAKAMA_SERVER_KEY || 'defaultkey') },
 });
 // Keep "</script" sequences inside the bundle from closing the inline script tag.
 const appSource = app.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');

@@ -7,12 +7,20 @@
 //   npm run server        (once: it keeps running; TURN_SECONDS=3 in .env makes the timer tests quick)
 //   npm run bots          (in another terminal)
 //   npm run smoke:online -- 3
+//
+// Against another server, set NAKAMA_HOST, NAKAMA_PORT, NAKAMA_SSL=true and NAKAMA_SERVER_KEY, as for the bot runner.
 import { randomBytes } from 'node:crypto';
 import { SEATS, type Card, type ThullaView } from '@thulla/engine';
 import { Table, errorText, type ServerAddress } from '../apps/web/src/net';
 import type { SeatsMessage, WelcomeMessage } from '../packages/nakama/src/protocol';
 
-const server: ServerAddress = { host: '127.0.0.1', port: '7350', ssl: false, serverKey: 'defaultkey' };
+const env = process.env;
+const server: ServerAddress = {
+  host: env.NAKAMA_HOST || '127.0.0.1',
+  port: env.NAKAMA_PORT || '7350',
+  ssl: env.NAKAMA_SSL === 'true',
+  serverKey: env.NAKAMA_SERVER_KEY || 'defaultkey',
+};
 const games = Number(process.argv[2] || 1);
 
 interface Player {

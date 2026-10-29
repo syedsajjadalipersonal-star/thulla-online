@@ -1,0 +1,18 @@
+# HTTPS for the table. Caddy gets and renews the certificate for {$DOMAIN} by itself.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Nakama's API and its WebSocket.
+	@nakama path /v2/* /ws /ws/*
+	reverse_proxy @nakama nakama:7350
+
+	# The table page and anything beside it.
+	root * /srv/www
+	file_server
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+}
